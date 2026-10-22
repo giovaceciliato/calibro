@@ -1,0 +1,58 @@
+# Builds downloadable desktop apps for Windows, macOS and Linux when you push a
+# version tag such as "v0.1.0" (see docs/BEGINNER_GUIDE.md, "Making a release").
+name: Release desktop apps
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: calibro-linux-x86_64
+            bin: calibro
+          - os: windows-latest
+            name: calibro-windows-x86_64
+            bin: calibro.exe
+          - os: macos-latest
+            name: calibro-macos-arm64
+            bin: calibro
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release -p calibro
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p "${{ matrix.name }}"
+          cp "target/release/${{ matrix.bin }}" "${{ matrix.name }}/"
+          cp README.md LICENSE "${{ matrix.name }}/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "${{ matrix.name }}.zip" "${{ matrix.name }}"
+          else
+            tar -czf "${{ matrix.name }}.tar.gz" "${{ matrix.name }}"
+          fi
+      - name: Upload to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ matrix.name }}.zip
+            ${{ matrix.name }}.tar.gz
+          fail_on_unmatched_files: false
+      - name: Keep as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}

@@ -1,0 +1,13 @@
+[package]
+name = "calibro-core"
+description = "Document model, parametric feature history, recompute and undo/redo for Calibro"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+calibro-sketch.workspace = true
+calibro-kernel.workspace = true

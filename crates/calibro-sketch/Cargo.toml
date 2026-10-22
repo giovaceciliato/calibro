@@ -1,0 +1,9 @@
+[package]
+name = "calibro-sketch"
+description = "2D sketch model, geometric constraint solver and profile detection for Calibro"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true

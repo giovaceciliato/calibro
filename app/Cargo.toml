@@ -1,0 +1,36 @@
+[package]
+name = "calibro"
+description = "Calibro - a precision 3D CAD application written in Rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+calibro-sketch.workspace = true
+calibro-kernel.workspace = true
+calibro-core.workspace = true
+calibro-io.workspace = true
+calibro-project.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "persistence"] }
+egui = "0.37"
+egui-wgpu = "0.37"
+bytemuck = { version = "1", features = ["derive"] }
+glam = { version = "0.34", features = ["bytemuck"] }
+log = "0.4"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+env_logger = "0.11"
+rfd = "0.17"
+png = "0.18"
+eframe = { version = "0.37", default-features = false, features = ["wgpu", "default_fonts", "persistence", "x11", "wayland"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "Element", "HtmlElement"] }
+js-sys = "0.3"
+rfd = "0.17"
+wasm-bindgen = "0.2"
+# truck pulls in `rand` -> getrandom 0.2, which needs the `js` backend in browsers
+getrandom = { version = "0.2", features = ["js"] }

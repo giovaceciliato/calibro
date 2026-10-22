@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/calibro-sketch",
+    "crates/calibro-kernel",
+    "crates/calibro-core",
+    "crates/calibro-io",
+    "crates/calibro-project",
+    "app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/YOUR-USERNAME/calibro"
+rust-version = "1.88"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+truck-modeling = "0.6"
+truck-shapeops = "0.4"
+truck-meshalgo = "0.4"
+truck-stepio = "0.3"
+truck-topology = "0.6"
+calibro-sketch = { path = "crates/calibro-sketch" }
+calibro-kernel = { path = "crates/calibro-kernel" }
+calibro-core = { path = "crates/calibro-core" }
+calibro-io = { path = "crates/calibro-io" }
+calibro-project = { path = "crates/calibro-project" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+opt-level = 3
+lto = "thin"

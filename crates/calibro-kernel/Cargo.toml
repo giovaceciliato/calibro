@@ -1,0 +1,18 @@
+[package]
+name = "calibro-kernel"
+description = "B-rep geometry kernel adapter (truck backend) for Calibro"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+truck-modeling.workspace = true
+truck-shapeops.workspace = true
+truck-meshalgo.workspace = true
+truck-topology.workspace = true
+calibro-sketch.workspace = true
+
+[dev-dependencies]

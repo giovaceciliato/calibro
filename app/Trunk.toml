@@ -1,0 +1,11 @@
+trunk-version = ">=0.21"
+
+# Trunk builds the browser version: https://trunk-rs.github.io/trunk/
+[build]
+target = "index.html"
+dist = "../dist"
+release = true
+
+[serve]
+port = 8080
+open = false

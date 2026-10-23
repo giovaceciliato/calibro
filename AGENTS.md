@@ -39,67 +39,41 @@ then `docs/FEATURE_TRACKER.md` (full scope + status), `docs/TEST_REPORT.md` (evi
 - Useful local tools used so far: `crates/calibro-io/examples/{export_samples,showcase}.rs`.
 
 ## Current state (update every session)
-_Last updated: 2026-10-23 (sketch circle interaction fix)._
-- Stage 1 complete (see tracker).
-- On `main`: toolchain pinned to 1.97.0, responsive layout (panels auto-hide below 900/620 px,
-  *Tools*/*Panel* toggles), window-title fix, release notes, this file.
-- GitHub Actions on d11b79d: **CI green** (fmt, clippy, 58 tests incl. GPU tests on lavapipe,
-  wasm build) and **Pages green**. Live web app re-checked in a real browser (Claude desktop
-  browser pane, WebGPU on Intel): loads, narrow layout correct, no console spam.
-- Fedora packaging added (`packaging/`): RPM spec, desktop entry, MIME type for `.calibro`,
-  AppStream metainfo, icons, user-level `install.sh`, and `packaging/build-linux-packages.sh`
-  (builds `dist-linux/*.rpm` + portable `*.tar.gz` from a release binary). `release.yml` now
-  builds them too and pins the Linux runner to ubuntu-24.04 (glibc 2.39 → Fedora 40+).
-  Packages built locally and given to the owner for testing on Fedora/Bazzite; portable
-  install/uninstall + launch verified on Ubuntu/Xvfb; RPM metadata checked with `rpm -qp`,
-  `desktop-file-validate`, `appstreamcli validate`. RPM **not yet installed on a real Fedora**.
-- Packaging commit pushed to `main` (release.yml only runs on tags, so nothing is published until a release is created).
-- 2026-10-23: owner reported that pushing an extrusion into the body didn't remove material.
-  Fixed: `Document::auto_extrude_mode` switches Join↔Cut when the distance sign flips for a
-  sketch made on that body's face (handle turns red with a "cut" label). Also face-sketch
-  axes now follow world X (`Plane::from_origin_normal`) so H/V match the screen. 60 tests.
-- 2026-10-23 (latest): **Modify tools** added — Fillet, Chamfer (straight edges between flat
-  faces; several edges at once, not edges sharing a corner), Shell (convex flat-faced bodies,
-  open faces or closed), Sweep (profile along an open line/tangent-arc chain sketch), Loft
-  (two closed profiles). Kernel code in `crates/calibro-kernel/src/ops.rs` (module docs explain
-  the tricks: boolean nudge, tolerance ladder, sliver faces). New `FeatureKind` variants;
-  `.calibro` **FORMAT_VERSION 2** (v1 files load unchanged). UI: Shift+click selects several
-  edges (`Selection::edges`), inspector panels for each feature, toolbar buttons enabled.
-  **Space** with a flat face selected = `start_sketch_on_face` (camera faces it, ortho,
-  framed). Demo: `examples/modify-tools.calibro` (`cargo run -p calibro-io --example modify_tools`). 68 tests.
-- Owner gave the OK for release v0.1.0 (2026-10-23). The AI session could NOT create it:
-  pushing tags and the releases API are blocked for Claude sessions (HTTP 403). The owner
-  creates it on github.com (Releases → Draft a new release → new tag `v0.1.0` on `main` →
-  Publish). The tag push starts `release.yml`, which now uses `RELEASE_NOTES.md` as the text
-  and attaches the Windows zip, macOS tar.gz, Linux tar.gz, Fedora RPM and portable package.
-- Not yet done: check the published release assets; GitHub Release v0.1.0 (waiting for the owner's OK). Windows/macOS binaries
-  have been built by CI but never launched on real machines.
-- Local working copies used by the 2026-10-22/23 sessions: `/home/claude/calibro` (original,
-  not a git repo) and `/home/claude/calibro-gh` (git clone of GitHub). In a new session just
-  clone the GitHub repo.
+_Last updated: 2026-10-23 16:30 (status audit after PRs #1–#4)._
 
-- Dark-blue UI refresh merged into `main` via PR #1 (merge commit `d8cff4b4f771a487d0502a06886902d76b449c70`): shared navy theme, blue selection, vector tool icons + shortcut hints, document header with Save/Export, project panel counts, empty-workspace start card, coordinated viewport/grid/annotation and browser loading colors. No document-format or kernel changes. Validated with pinned Rust 1.97: fmt, clippy with warnings denied, all 68 tests (1 diagnostic ignored), native build and Xvfb/lavapipe UI checks. Screenshots and limits are in `docs/TEST_REPORT.md` §8. Panels now hide on resize across compact thresholds; perspective grid bounds avoid software-GPU near-plane artifacts.
-
-- Release-download improvements prepared on `release/visible-downloads`: direct Windows `.exe` plus ZIP; one final upload job waits for Windows/macOS/Linux builds; release body contains exact tag-specific download links and SHA-256 checksums; missing, empty or ambiguous platform packages fail validation. Also handles `release: published`. Linux RPM/portable packaging smoke-checked with the existing native binary; workflow validated with actionlint 1.7.12. No release/tag was created.
-
-- PR #2 merged into main (`857cf0c`). Release `0.1.1` exists as a prerelease, but has no assets: run `39946759282` built all three platforms successfully and failed only because `prepare-release.py` required a `v` prefix. Fix on `fix/release-tag-recovery` accepts the real tag, adds regression tests to CI and a manual recovery workflow that verifies tag/build provenance before attaching the original artifacts. No tag/release changes or recovery upload performed yet.
-
-- PR #3 was merged into main (`5436754`). New branch `fix/sketch-circles`: reproduced missing circle drag support; preserved two-click circles, added centre-drag-release and exact Radius → Create circle in sketch Properties, and reset unfinished points on toolbar/keyboard tool changes. Four app regression tests plus Xvfb checks; full suite now 72 passed (1 diagnostic ignored). See test report §11 and `docs/images/sketch-circles.png`. No serialization changes.
+**Quick summary (read this first; the history is in the session log and docs/TEST_REPORT.md):**
+- `main` = `d92df1b`. Locally re-checked on Rust stable + lavapipe: clippy `-D warnings` clean,
+  **72 tests pass** (1 diagnostic ignored). CI and Pages green; web app live.
+- Features on `main`: sketcher + solver (circles now also by drag / exact radius, PR #4),
+  extrude/revolve/primitives/booleans/patterns/mirror, Fillet/Chamfer/Shell/Sweep/Loft (first
+  versions, limits in tracker), Space = sketch on selected face, auto-cut when extruding into
+  a body, dark-blue UI (PR #1), native `.calibro` format v2, STEP/STL/OBJ/GLB export.
+- **Open PR #5** `feat/edge-drag-handles` (on-model drag handles for fillet/chamfer, 85 tests,
+  CI green, mergeable). Waiting for the owner to review/merge.
+- **Releases** (tags have NO `v` prefix; `release.yml` was changed to accept that):
+  - `0.1.1` (prerelease): assets present — Windows `.exe` + `.zip`, macOS arm64 `.tar.gz`,
+    Linux `.tar.gz`, Fedora RPM, portable Linux package, `SHA256SUMS.txt` (attached by the
+    *Recover release downloads* workflow). Built from `857cf0c`, i.e. **without** PR #3/#4
+    (circle drawing fix) and without PR #5.
+  - `0.1.0` and `beta`: releases with **no assets** (tags created before the workflow handled
+    them). Candidates for deletion by the owner to avoid confusing visitors.
+  - Package version mismatch: `Cargo.toml` is still `0.1.0`, so the 0.1.1 release contains
+    `calibro-0.1.0-1.x86_64.rpm`. Bump `workspace.package.version` before the next release.
+- AI sessions cannot push tags or call the releases API (HTTP 403). The owner creates
+  releases on github.com; the workflow builds and attaches all packages.
+- Never launched on real hardware: Windows/macOS binaries, RPM on real Fedora.
 
 ## Next steps (in order)
-1. Review and merge the sketch-circle interaction PR; then deploy/build a new release for desktop users. Release recovery fix #3 is merged; if recovery is still needed, use **Recover release downloads** with tag `0.1.1` and source run `39946759282` (recovery status not checked in this session).
-2. ~~Get the 2026-10-23 changes onto `main`~~ (done, CI green).
-3. Get the owner's feedback on the Fedora/Bazzite packages.
-4. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
-   check that `release.yml` attaches the three archives.
-5. Re-check the live web app after deploy (narrow-screen layout, Tools/Panel toggles).
-6. Owner feedback on the Modify tools; then extend them: fillets on edges meeting at a corner
-   (needs a corner patch), fillet/chamfer on curved edges, shell of cylinders, multi-section
+1. Owner: review/merge PR #5 (edge drag handles).
+2. Bump version to 0.1.2 in `Cargo.toml` (+ RELEASE_NOTES.md), then owner publishes release
+   `0.1.2` from `main` so desktop users get the circle fix, drag handles and modify tools.
+3. Owner: delete the empty `0.1.0` and `beta` releases (optional cleanup).
+4. Get feedback from real Windows/macOS/Fedora runs.
+5. Modify tools: corner fillets, curved-edge fillet/chamfer, shell of cylinders, multi-section
    loft, click-through UI test of Sweep/Loft creation.
-7. Stage 2 (tracker §9): on-canvas dimension editing, trim/extend + curve intersection,
-   topological naming v1 for sketches on faces (fillet edges are stored as end points, so
-   they also break when an earlier edit moves the edge), 3MF export, hide cylinder seam
-   edges, capped section view.
+6. Stage 2 (tracker §9): on-canvas dimension editing, trim/extend, topological naming v1
+   (sketch-on-face and fillet edges are stored geometrically and break when earlier edits move
+   them), 3MF export, hide cylinder seam edges, capped section view.
 
 ## Session log
 - 2026-10-22 — Stage 1 built: research, architecture, all crates, app, native format, exports,
@@ -124,3 +98,4 @@ _Last updated: 2026-10-23 (sketch circle interaction fix)._
 - 2026-10-23 — Investigated the pasted failure and verified GitHub run/artifact metadata: all Windows/macOS/Linux packages exist; final upload rejected tag `0.1.1` due to the overly strict prefix requirement. Prepared fix, Python regression tests, numeric tag trigger and a provenance-checked recovery workflow on a separate review branch.
 
 - 2026-10-23 — Owner reported sketch circles could not be drawn. Reproduced drag failure (two clicks already worked), added drag creation and exact-radius Properties action, fixed shortcut gesture state, and verified four new app tests plus native drawing/extrusion. Published for review on `fix/sketch-circles`; 72 workspace tests pass.
+- 2026-10-23 16:30 — Status audit at the owner's request: re-ran tests on main (72 ok), checked releases/PRs, rewrote Current state + Next steps (docs-only, via branch + PR).

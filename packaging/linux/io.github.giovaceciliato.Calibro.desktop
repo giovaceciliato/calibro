@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Calibro
+GenericName=3D CAD
+Comment=Precision 3D CAD: sketch, constrain, extrude, edit the history
+Exec=calibro %f
+Icon=io.github.giovaceciliato.Calibro
+Terminal=false
+Categories=Graphics;3DGraphics;Engineering;
+Keywords=CAD;3D;modeling;STEP;STL;sketch;parametric;
+MimeType=application/vnd.calibro.project;
+StartupWMClass=calibro

@@ -271,3 +271,18 @@ Every push to `main` re-runs **CI** and re-publishes the **web app** automatical
 - [ ] `cargo run --release -p calibro` opens the desktop app
 - [ ] Made a first model, saved it, reopened it, exported a STEP/GLB
 - [ ] (Optional) Created release `v0.1.0` to get downloadable desktop apps
+
+---
+
+## 12. Fedora and Bazzite
+
+Two Linux packages are built for each release (and by `packaging/build-linux-packages.sh`):
+
+| Package | For | How to install | How to remove |
+|---|---|---|---|
+| `calibro-<version>-1.x86_64.rpm` | Fedora Workstation 40+ (normal, not immutable) | double-click it (opens *Software*) → *Install*, or `sudo dnf install ./calibro-<version>-1.x86_64.rpm` | `sudo dnf remove calibro` |
+| `calibro-<version>-linux-x86_64.tar.gz` | **Bazzite**, Silverblue, Kinoite, any Linux | extract it, open a terminal in the folder, run `./install.sh` (no password needed) | `./install.sh --remove` |
+
+On Bazzite prefer the `.tar.gz`: installing an RPM there means layering it with
+`rpm-ostree install ./calibro-….rpm` and rebooting, which works but is slower to update.
+After installing, Calibro appears in the app menu, and `.calibro` files open with it on double-click.

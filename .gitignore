@@ -3,3 +3,4 @@
 *.calibro.tmp
 *.calibro.bak
 .DS_Store
+/dist-linux

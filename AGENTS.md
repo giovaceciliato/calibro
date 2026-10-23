@@ -46,6 +46,14 @@ _Last updated: 2026-10-23 (after commit d11b79d)._
 - GitHub Actions on d11b79d: **CI green** (fmt, clippy, 58 tests incl. GPU tests on lavapipe,
   wasm build) and **Pages green**. Live web app re-checked in a real browser (Claude desktop
   browser pane, WebGPU on Intel): loads, narrow layout correct, no console spam.
+- Fedora packaging added (`packaging/`): RPM spec, desktop entry, MIME type for `.calibro`,
+  AppStream metainfo, icons, user-level `install.sh`, and `packaging/build-linux-packages.sh`
+  (builds `dist-linux/*.rpm` + portable `*.tar.gz` from a release binary). `release.yml` now
+  builds them too and pins the Linux runner to ubuntu-24.04 (glibc 2.39 → Fedora 40+).
+  Packages built locally and given to the owner for testing on Fedora/Bazzite; portable
+  install/uninstall + launch verified on Ubuntu/Xvfb; RPM metadata checked with `rpm -qp`,
+  `desktop-file-validate`, `appstreamcli validate`. RPM **not yet installed on a real Fedora**.
+- Packaging commit pushed to `main` (release.yml only runs on tags, so nothing is published until a release is created).
 - Not yet done: GitHub Release v0.1.0 (waiting for the owner's OK). Windows/macOS binaries
   have been built by CI but never launched on real machines.
 - Local working copies used by the 2026-10-22/23 sessions: `/home/claude/calibro` (original,
@@ -54,10 +62,11 @@ _Last updated: 2026-10-23 (after commit d11b79d)._
 
 ## Next steps (in order)
 1. ~~Get the 2026-10-23 changes onto `main`~~ (done, CI green).
-2. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
+2. Get the owner's feedback on the Fedora/Bazzite packages.
+3. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
    check that `release.yml` attaches the three archives.
-3. Re-check the live web app after deploy (narrow-screen layout, Tools/Panel toggles).
-4. Stage 2 (tracker §9): on-canvas dimension editing, trim/extend + curve intersection,
+4. Re-check the live web app after deploy (narrow-screen layout, Tools/Panel toggles).
+5. Stage 2 (tracker §9): on-canvas dimension editing, trim/extend + curve intersection,
    topological naming v1 for sketches on faces, planar chamfer, shell, two-profile loft,
    3MF export, hide cylinder seam edges, capped section view.
 
@@ -68,3 +77,4 @@ _Last updated: 2026-10-23 (after commit d11b79d)._
   at Clippy (Rust 1.99). Pinned toolchain, made layout responsive, fixed title spam, wrote
   release notes, added this handoff file.
 - 2026-10-23 (later) — Owner connected GitHub + installed the Claude app; pushed d11b79d; CI and Pages green; verified the live web app.
+- 2026-10-23 (later) — Built Fedora RPM + portable Linux package on request; added packaging to the release workflow (pushed to main; no release yet).

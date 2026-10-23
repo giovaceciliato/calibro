@@ -17,14 +17,16 @@ The first release of Calibro, an open-source precision 3D CAD application writte
 |---|---|
 | Windows 10/11 (64-bit) | `calibro-windows-x86_64.zip` → unzip → run `calibro.exe` |
 | macOS (Apple Silicon) | `calibro-macos-arm64.tar.gz` |
-| Linux (x86_64) | `calibro-linux-x86_64.tar.gz` |
+| Fedora 40+ (x86_64) | `calibro-0.1.0-1.x86_64.rpm` → double-click, or `sudo dnf install ./calibro-0.1.0-1.x86_64.rpm` |
+| Any Linux, incl. Bazzite/Silverblue (x86_64) | `calibro-0.1.0-linux-x86_64.tar.gz` → extract → `./install.sh` (installs for your user, adds a menu entry) |
+| Linux, bare binary | `calibro-linux-x86_64.tar.gz` |
 
 The apps are not code-signed yet:
 - **Windows:** SmartScreen may warn → *More info* → *Run anyway*.
 - **macOS:** after extracting, open Terminal in that folder and run
   `xattr -d com.apple.quarantine calibro && ./calibro`
-- **Linux:** `tar xzf calibro-linux-x86_64.tar.gz && ./calibro-linux-x86_64/calibro`
-  (needs Vulkan or OpenGL drivers, e.g. `mesa-vulkan-drivers`).
+- **Linux:** needs a recent system (glibc 2.39+: Fedora 40+, Ubuntu 24.04+) and Vulkan or
+  OpenGL drivers (Fedora: `mesa-vulkan-drivers`, installed by default).
 
 ## Known limitations
 Fillet, chamfer, shell, sweep and loft are not available yet. Booleans with spheres and

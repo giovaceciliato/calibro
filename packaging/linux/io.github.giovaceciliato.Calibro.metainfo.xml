@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.giovaceciliato.Calibro</id>
+  <name>Calibro</name>
+  <summary>Precision 3D CAD written in Rust</summary>
+  <developer id="io.github.giovaceciliato">
+    <name>Giovanni Ceciliato</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Apache-2.0</project_license>
+  <description>
+    <p>Sketch with constraints and dimensions, extrude and revolve solids, combine them with
+    booleans and edit any step of the parametric history. Exports STEP, STL, OBJ and glTF.</p>
+  </description>
+  <launchable type="desktop-id">io.github.giovaceciliato.Calibro.desktop</launchable>
+  <url type="homepage">https://github.com/giovaceciliato/calibro</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-23"/>
+  </releases>
+</component>

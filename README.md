@@ -4,7 +4,7 @@
 modelling workflow popularised by Shapr3D — sketch, constrain, extrude, edit the history — and
 runs on the desktop (Windows, macOS, Linux) and in the browser.
 
-![Calibro showing a bracket, a revolved knob, a patterned set of pins and a pipe tee](docs/images/showcase.png)
+![Calibro dark-blue CAD workspace showing a hollow tray, swept pipe and lofted transition](docs/images/calibro-dark-blue.png)
 
 > Calibro is an independent project. It is not affiliated with, endorsed by, or derived from
 > Shapr3D's code, assets or file format.

@@ -291,6 +291,8 @@ impl CalibroApp {
                     ui.radio_value(&mut self.display, DisplayMode::XRay, "X-ray");
                     ui.separator();
                     ui.checkbox(&mut self.show_grid, "Grid");
+                    ui.checkbox(&mut self.show_tools, "Tool panel");
+                    ui.checkbox(&mut self.show_inspector, "Inspector panel");
                     ui.checkbox(&mut self.section.enabled, "Section view");
                 });
                 ui.menu_button("Help", |ui| {
@@ -378,7 +380,9 @@ impl CalibroApp {
     // ------------------------------------------------------------------ left: tools
 
     pub fn left_panel(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::left("tools").resizable(false).exact_size(190.0).show(ui, |ui| {
+        let narrow = ui.ctx().content_rect().width() < 1200.0;
+        let width = if narrow { 150.0 } else { 190.0 };
+        egui::Panel::left("tools").resizable(false).exact_size(width).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let in_sketch = self.sketch.is_some();
                 let w = ui.available_width();
@@ -495,8 +499,12 @@ impl CalibroApp {
     pub fn right_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::right("inspector")
             .resizable(true)
-            .default_size(310.0)
-            .min_size(240.0)
+            .default_size(if ui.ctx().content_rect().width() < 1200.0 {
+                260.0
+            } else {
+                310.0
+            })
+            .min_size(220.0)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     egui::CollapsingHeader::new(RichText::new("Bodies").strong())

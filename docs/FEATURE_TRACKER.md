@@ -35,7 +35,7 @@ column says how we approximate it.
 | History / parametric | Feature history, dependency-driven recompute, caching, failure propagation, undo/redo work and are tested. Topological naming remains. |
 | Viewport, rendering, interaction | wgpu viewport, navigation, display modes, materials, selection, section view, measuring and handles work. Shadows, AO, HDR lighting, capped sections remain. |
 | Files & interoperability | Native `.calibro`, STEP export, STL/OBJ/GLB export and STEP/STL/OBJ import (as reference meshes) work and are tested, partly with independent tools. IGES, 3MF, USDZ remain; proprietary formats are blocked. |
-| Platform, build, deployment | Native Linux build verified. Browser build and the GitHub workflows are written but could not be run in this sandbox. |
+| Platform, build, deployment | Native Linux build verified; Windows/macOS/web built on GitHub; web app live on GitHub Pages and checked in a real browser. Responsive layout for narrow screens added. |
 
 The application is a **working foundation**, not a finished Shapr3D equivalent. The largest
 gaps are fillet/chamfer/shell/sweep/loft (kernel-limited), topological naming (sketches on
@@ -166,11 +166,11 @@ drawings, and Parasolid/native CAD imports.
 
 | Item | Status | Test | Notes |
 |---|---|---|---|
-| Native desktop build (Linux verified; Windows/macOS via CI) | Tested (Linux) | built + run on Xvfb with software Vulkan | Windows/macOS builds are configured in `release.yml` but not yet run |
-| Browser build (WebAssembly, WebGPU + WebGL2) | **Blocked here** | — | This sandbox cannot download the wasm32 standard library (network policy). Code paths reviewed; CI `web` job and `pages.yml` will build it. Treat as unverified until the first CI run is green |
-| GitHub Actions CI (fmt, clippy, tests incl. GPU tests, wasm) | Implemented | not yet run on GitHub | `.github/workflows/ci.yml` |
-| GitHub Pages deployment | Implemented | not yet run | `.github/workflows/pages.yml` |
-| Desktop release packages on version tags | Implemented | not yet run | `.github/workflows/release.yml` |
+| Native desktop build | Tested (Linux run); Windows/macOS compiled on GitHub | Linux run on Xvfb with software Vulkan | Windows/macOS binaries not yet launched on real machines |
+| Browser build (WebAssembly) | Tested | built by GitHub Actions, published on GitHub Pages, opened in a real browser: app starts, viewport renders, box primitive created | Live at https://giovaceciliato.github.io/calibro/ |
+| GitHub Actions CI (fmt, clippy, tests incl. GPU tests, wasm) | Implemented | ran on GitHub: wasm job green; clippy failed on Rust 1.99 → toolchain now pinned to 1.97.0 (`rust-toolchain.toml`) | `.github/workflows/ci.yml` |
+| GitHub Pages deployment | Tested | deployed successfully | `.github/workflows/pages.yml` |
+| Desktop release packages on version tags | Tested (manual run) | Windows, macOS arm64 and Linux builds succeeded on GitHub (8–10 MB each) | `.github/workflows/release.yml` |
 | Kernel panic isolation | Tested (native) | unit | On WebAssembly panics abort; release truck builds skip the asserting checks |
 | iPad / touch-first UI | Planned | — | eframe runs in iPad Safari via the web build; native iPad app would need a different shell |
 | Cloud sync, team spaces, review links | Researched | — | Out of scope for an open-source local app |

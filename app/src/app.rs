@@ -150,6 +150,13 @@ pub struct CalibroApp {
     pub show_shortcuts: bool,
     pub show_about: bool,
     pub show_grid: bool,
+    /// Side panels can be hidden to give the viewport room on small screens.
+    pub show_tools: bool,
+    pub show_inspector: bool,
+    /// Set once the first frame has chosen panel visibility from the screen width.
+    pub layout_initialised: bool,
+    /// Last window title sent, so it is only updated when it changes.
+    pub last_title: String,
     pub picking_plane: bool,
     pub viewport_rect: egui::Rect,
     pub time: f64,
@@ -210,6 +217,10 @@ impl CalibroApp {
             show_shortcuts: false,
             show_about: false,
             show_grid: true,
+            show_tools: true,
+            show_inspector: true,
+            layout_initialised: false,
+            last_title: String::new(),
             picking_plane: false,
             viewport_rect: egui::Rect::NOTHING,
             time: 0.0,
@@ -1157,13 +1168,39 @@ impl eframe::App for CalibroApp {
             if self.ed.is_dirty() { "● " } else { "" },
             self.file_name
         );
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        if title != self.last_title {
+            #[cfg(target_arch = "wasm32")]
+            if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+                doc.set_title(&title);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.last_title = title;
+        }
+        // Small screens (phones, narrow browser windows): start with the side
+        // panels hidden so the viewport stays usable. They can be toggled any time.
+        if !self.layout_initialised {
+            let w = ctx.content_rect().width();
+            if w > 0.0 {
+                self.show_inspector = w >= 900.0;
+                self.show_tools = w >= 620.0;
+                self.layout_initialised = true;
+            }
+        }
 
         self.shortcuts(&ctx, frame);
         self.menu_bar(ui, frame);
         self.status_bar(ui);
-        self.left_panel(ui);
-        self.right_panel(ui);
+        // Choosing a sketch plane happens in the inspector, so make sure it is visible.
+        if self.picking_plane && self.sketch.is_none() {
+            self.show_inspector = true;
+        }
+        if self.show_tools {
+            self.left_panel(ui);
+        }
+        if self.show_inspector {
+            self.right_panel(ui);
+        }
         self.viewport_panel(ui, frame);
         self.dialogs(&ctx);
     }

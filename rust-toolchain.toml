@@ -1,0 +1,8 @@
+# Pins the exact Rust version Calibro is built and tested with, so local builds,
+# CI and releases all behave the same. rustup installs it automatically.
+# To upgrade: change the version, run `cargo clippy --workspace --all-targets`
+# and `cargo test --workspace`, fix anything new, then commit.
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

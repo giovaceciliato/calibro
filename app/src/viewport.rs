@@ -1489,7 +1489,24 @@ impl CalibroApp {
             .pivot(Align2::RIGHT_TOP)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
+                    // Never wider than the viewport: wrap onto two lines when narrow.
+                    ui.set_max_width((rect.width() - 32.0).max(120.0));
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .selectable_label(self.show_tools, "Tools")
+                            .on_hover_text("Show / hide the tool panel")
+                            .clicked()
+                        {
+                            self.show_tools = !self.show_tools;
+                        }
+                        if ui
+                            .selectable_label(self.show_inspector, "Panel")
+                            .on_hover_text("Show / hide bodies, history and inspector")
+                            .clicked()
+                        {
+                            self.show_inspector = !self.show_inspector;
+                        }
+                        ui.separator();
                         for v in ["Top", "Front", "Right", "Iso"] {
                             if ui.small_button(v).clicked() {
                                 self.set_view(v);

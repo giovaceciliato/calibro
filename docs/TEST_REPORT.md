@@ -93,3 +93,14 @@ Not done: opening the files in Blender, Fusion, Maya, 3ds Max or Cinema 4D (not 
 - **GitHub Actions workflows** — written, not run (no repository yet).
 - **Windows and macOS builds** — not compiled here; configured in `release.yml`.
 - Performance with large models — not measured.
+
+## 6. Update — 23 Oct 2026 (first GitHub runs)
+
+| Item | Result |
+|---|---|
+| Pages workflow (WebAssembly build + deploy) | ✅ success on GitHub; site live |
+| Web app in a real browser (Claude desktop browser pane) | ✅ starts, renders the viewport, creates a Box (kernel works in wasm) |
+| Release workflow (manual run) | ✅ Linux 9.96 MB, macOS arm64 7.9 MB, Windows 8.62 MB artifacts |
+| CI | ❌ Clippy step failed on GitHub (stable = Rust 1.99.1, newer lints than the tested 1.97.0) → fixed by pinning `rust-toolchain.toml` to 1.97.0 in all workflows |
+| Issues found in the browser and fixed | window title re-sent every frame (console flooded) → only when it changes, `document.title` on web; side panels squeezed the viewport on narrow screens → compact widths, auto-hide below 900/620 px, *Tools*/*Panel* toggles; view bar overlapped the inspector → wraps within the viewport |
+| After the fixes (local, Rust 1.97.0) | ✅ fmt, clippy `-D warnings`, 58 tests, release build, UI toggles checked on Xvfb |

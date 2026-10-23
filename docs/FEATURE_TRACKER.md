@@ -31,14 +31,14 @@ column says how we approximate it.
 | Area | State at the end of Stage 1 |
 |---|---|
 | Sketching & constraints | Core tools, all listed constraint types and dimensions, solver and region detection work and are tested. Splines, ellipses, trim/extend, sketch patterns and DXF import remain. |
-| Solid modelling | Extrude, revolve, booleans, primitives, transforms, patterns and mirror work and are tested. Fillet is blocked by the kernel; chamfer, shell, sweep, loft and direct modelling remain. |
+| Solid modelling | Extrude, revolve, booleans, primitives, transforms, patterns and mirror work and are tested. Fillet, chamfer (straight edges between flat faces), shell (convex flat-faced bodies), sweep (smooth line/arc paths) and loft (two profiles) added 2026-10-23 with limits; direct modelling remains. |
 | History / parametric | Feature history, dependency-driven recompute, caching, failure propagation, undo/redo work and are tested. Topological naming remains. |
 | Viewport, rendering, interaction | wgpu viewport, navigation, display modes, materials, selection, section view, measuring and handles work. Shadows, AO, HDR lighting, capped sections remain. |
 | Files & interoperability | Native `.calibro`, STEP export, STL/OBJ/GLB export and STEP/STL/OBJ import (as reference meshes) work and are tested, partly with independent tools. IGES, 3MF, USDZ remain; proprietary formats are blocked. |
 | Platform, build, deployment | Native Linux build verified; Windows/macOS/web built on GitHub; web app live on GitHub Pages and checked in a real browser. Responsive layout for narrow screens added. |
 
 The application is a **working foundation**, not a finished Shapr3D equivalent. The largest
-gaps are fillet/chamfer/shell/sweep/loft (kernel-limited), topological naming (sketches on
+gaps are general fillet/chamfer/shell (curved edges, corners, non-convex bodies — kernel-limited), topological naming (sketches on
 faces don't follow later edits of that face), sphere/torus booleans (kernel-limited), 2D
 drawings, and Parasolid/native CAD imports.
 
@@ -92,11 +92,11 @@ drawings, and Parasolid/native CAD imports.
 | Linear pattern | [S1] | Tested | unit | | — |
 | Circular pattern | [S1] | Tested | unit + showcase | | — |
 | Mirror body | spec | Tested | unit | `kernel::mirror` | — |
-| Fillet | [S1] | **Blocked** (kernel) | — | | truck 0.6 has no fillet. Path: (a) upstream truck work, (b) optional Open CASCADE backend on desktop behind `calibro-kernel`, (c) own rolling-ball fillet for planar/cylindrical edges |
-| Chamfer | [S1] | Planned | — | | Planar-only chamfer can be built with truck booleans (cut by a wedge); general case same as fillet |
-| Shell | [S1][S7] | Planned | — | | Needs surface offset; planar/cylindrical offset feasible |
-| Sweep | [S1][S6] | Planned | — | | truck has `tsweep`/`rsweep` and B-spline surfaces; general path sweep must be built |
-| Loft | [S1][S6] | Planned | — | | truck `try_wire_homotopy` covers simple lofts between two wires |
+| Fillet | [S1] | **Tested** (limited) | `fillet_box_edge`, `modify_features_fillet_chamfer_shell`; UI on Xvfb | | Own implementation (`calibro-kernel/src/ops.rs`): straight edges between two flat faces, any angle; several edges at once. Not yet: edges meeting at a corner (refused with a message), curved edges, variable radius. The round's centre is offset 0.5 % of r so truck's boolean stays transversal. General case: optional Open CASCADE backend or upstream truck work |
+| Chamfer | [S1] | **Tested** (limited) | `chamfer_two_edges_and_reject_bad_edges`; UI on Xvfb (`docs/images/shell-chamfer.png`) | | Equal-distance chamfer on straight edges between flat faces (wedge cut). Leaves hair-thin slivers (0.2 % of the distance) because of the boolean nudge |
+| Shell | [S1][S7] | **Tested** (limited) | `shell_open_box`, core test; UI on Xvfb | | Convex bodies with flat faces only (incl. chamfered ones); one or more open faces or closed hollow; editable thickness. Curved / non-convex bodies refused with a message (needs surface offset) |
+| Sweep | [S1][S6] | **Tested** (limited) | `sweep_along_line_and_arc`, `sweep_and_loft_features`; `examples/modify-tools.calibro` opened in the UI | | Profile regions along a path sketch of connected lines + tangent arcs (open chain) that starts at the profile. Sharp corners refused; no twist/scale; no splines |
+| Loft | [S1][S6] | **Tested** (limited) | `loft_square_to_square_and_circle`, core test | | Two closed profiles without holes. Exact ruled surfaces when segment counts match, otherwise resampled to 48-point polygons (shows many edge lines). No guide rails, no more than two profiles |
 | Split body / Wrap & Emboss / Replace face / Offset face | [S1] | Researched | — | | Stage 4+ |
 | Push-pull direct modelling of faces | [S1] | Planned | — | | Needs face-level history entries |
 
@@ -205,7 +205,7 @@ feature history, native format, STEP/STL/OBJ/GLB, wgpu viewport, full UI shell, 
 1. Run CI on GitHub; fix anything the WebAssembly build reports; publish the web app.
 2. Sketch: on-canvas dimension editing, trim/extend, curve–curve intersection splitting, splines.
 3. Topological naming v1: sketches on faces store (body, face signature) and re-resolve.
-4. Chamfer (planar), Shell (planar + cylindrical), simple Loft (two profiles).
+4. ~~Chamfer (planar), Shell (planar), simple Loft (two profiles)~~ — done 2026-10-23 together with straight-edge fillet and line/arc sweep. Next: cylindrical shell, corner fillets.
 5. 3MF export; IGES export study; STEP import as editable B-rep (convert stepio geometry).
 6. Hide tangent seam edges; capped section view; supersampled image export.
 

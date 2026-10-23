@@ -28,7 +28,11 @@ runs on the desktop (Windows, macOS, Linux) and in the browser.
 - **Files**: native editable `.calibro` projects; export STEP (exact), GLB, OBJ+MTL, STL;
   import STEP/STL/OBJ as reference geometry.
 
-Not yet: fillet, chamfer, shell, sweep, loft, 2D drawings, IGES/3MF — see
+- **Modify**: fillet and chamfer (straight edges), shell, sweep (line/arc paths), loft (two
+  profiles) — first versions with limits listed in the tracker.
+- **Sketch on a face like Shapr3D**: click a flat face, press **Space** — the camera turns to face it.
+
+Not yet: corner/curved-edge fillets, shell of curved bodies, 2D drawings, IGES/3MF — see
 [`docs/FEATURE_TRACKER.md`](docs/FEATURE_TRACKER.md) for the full, honest status of every feature.
 
 ## Quick start

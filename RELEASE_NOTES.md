@@ -8,6 +8,9 @@ The first release of Calibro, an open-source precision 3D CAD application writte
 - Constraints and dimensions with a real solver (fully / under / over-defined feedback)
 - Extrude (new body / join / cut / intersect, drag handle), revolve, box, cylinder, sphere
 - Booleans, move/rotate/scale, linear & circular patterns, mirror
+- Fillet, chamfer, shell, sweep and loft (first versions, see limitations)
+- Click a flat face and press Space to sketch on it, facing it (like Shapr3D)
+- Extruding into a body cuts material automatically
 - Parametric history: edit any step and everything after it rebuilds; undo/redo
 - Materials, X-ray, wireframe, section view, measuring
 - Native editable `.calibro` projects; export STEP, GLB, OBJ, STL; import STEP/STL/OBJ as reference
@@ -29,6 +32,8 @@ The apps are not code-signed yet:
   OpenGL drivers (Fedora: `mesa-vulkan-drivers`, installed by default).
 
 ## Known limitations
-Fillet, chamfer, shell, sweep and loft are not available yet. Booleans with spheres and
+Fillet/chamfer work on straight edges between flat faces (not on edges meeting at a corner
+or curved edges); shell works on convex flat-faced bodies; sweep needs a smooth line/arc
+path; loft joins two profiles. Booleans with spheres and
 with faces lying exactly on top of each other fail (the failing step is shown in red in the
 history). Full status: [docs/FEATURE_TRACKER.md](docs/FEATURE_TRACKER.md).

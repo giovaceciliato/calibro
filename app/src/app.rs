@@ -52,7 +52,8 @@ pub enum DisplayMode {
 pub struct Selection {
     pub bodies: Vec<BodyId>,
     pub face: Option<(BodyId, u32)>,
-    pub edge: Option<(BodyId, usize)>,
+    /// Selected B-rep edges (Shift/Ctrl+click adds more): (body, edge index in its mesh).
+    pub edges: Vec<(BodyId, usize)>,
     /// Sketch regions: (sketch feature, interior seed point)
     pub regions: Vec<(FeatureId, [f64; 2])>,
     pub feature: Option<FeatureId>,
@@ -65,7 +66,7 @@ impl Selection {
     pub fn clear_geometry(&mut self) {
         self.bodies.clear();
         self.face = None;
-        self.edge = None;
+        self.edges.clear();
         self.regions.clear();
     }
     pub fn clear_sketch(&mut self) {
@@ -607,6 +608,43 @@ impl CalibroApp {
         self.info("Sketch started — draw a closed shape, then press Finish (or Esc twice)");
     }
 
+    /// Starts a sketch on a flat face of a body and turns the camera to look straight at
+    /// it (Shapr3D-style: select a face, press Space).
+    pub fn start_sketch_on_face(&mut self, body: BodyId, face: u32) {
+        let Some(mesh) = self.ed.model().bodies.get(&body).map(|b| b.mesh.clone()) else {
+            return;
+        };
+        let Some(Some(pl)) = mesh.face_planes.get(face as usize).copied() else {
+            self.error("That face is curved — pick a flat face or a standard plane");
+            return;
+        };
+        // keep sketch coordinates aligned with the world origin
+        let n = glam::DVec3::from(pl.normal());
+        let o = n * n.dot(glam::DVec3::from(pl.origin));
+        let plane = Plane::from_origin_normal(o.to_array(), n.to_array());
+        // bounding box of the face, to frame it
+        let mut lo = glam::DVec3::splat(f64::INFINITY);
+        let mut hi = glam::DVec3::splat(f64::NEG_INFINITY);
+        for t in mesh.indices.chunks_exact(3) {
+            if mesh.face_ids[t[0] as usize] != face {
+                continue;
+            }
+            for &i in t {
+                let p = glam::DVec3::from(mesh.positions[i as usize].map(|x| x as f64));
+                lo = lo.min(p);
+                hi = hi.max(p);
+            }
+        }
+        self.start_sketch(plane, Some(body));
+        if lo.x.is_finite() {
+            self.ed.apply_silent(|d| {
+                camera::fit(&mut d.camera, lo, hi);
+                let target = d.camera.target;
+                camera::look_at_plane(&mut d.camera, plane.normal(), target);
+            });
+        }
+    }
+
     pub fn enter_sketch(&mut self, id: FeatureId) {
         let Some(FeatureKind::Sketch { plane, .. }) =
             self.ed.doc().feature(id).map(|f| f.kind.clone())
@@ -777,6 +815,195 @@ impl CalibroApp {
         }
         let kind = make(self.sel.bodies.clone());
         let id = self.ed.apply(label, |d| d.add_feature("", kind));
+        self.after_feature_created(id);
+    }
+
+    /// Straight selected edges of one body, as end-point pairs (for fillet/chamfer).
+    pub fn selected_straight_edges(&mut self) -> Option<(BodyId, Vec<[[f64; 3]; 2]>)> {
+        let Some(&(body, _)) = self.sel.edges.first() else {
+            self.error(
+                "Select one or more straight edges first (click an edge; Shift+click adds more)",
+            );
+            return None;
+        };
+        let mut out = Vec::new();
+        for &(b, e) in &self.sel.edges {
+            if b != body {
+                self.error("All selected edges must belong to the same body");
+                return None;
+            }
+            let Some(pl) = self
+                .ed
+                .model()
+                .bodies
+                .get(&b)
+                .and_then(|m| m.mesh.edges.get(e))
+            else {
+                continue;
+            };
+            let (Some(a), Some(z)) = (pl.first(), pl.last()) else {
+                continue;
+            };
+            let a = glam::DVec3::from(a.map(|x| x as f64));
+            let z = glam::DVec3::from(z.map(|x| x as f64));
+            let dir = (z - a).normalize_or_zero();
+            let straight = dir != glam::DVec3::ZERO
+                && pl.iter().all(|p| {
+                    let p = glam::DVec3::from(p.map(|x| x as f64)) - a;
+                    (p - dir * p.dot(dir)).length() < 1e-3 * (z - a).length().max(1.0)
+                });
+            if !straight {
+                self.error("Only straight edges can be rounded or chamfered for now");
+                return None;
+            }
+            out.push([a.to_array(), z.to_array()]);
+        }
+        if out.is_empty() {
+            self.error("The selected edges no longer exist");
+            return None;
+        }
+        Some((body, out))
+    }
+
+    pub fn cmd_fillet(&mut self, chamfer: bool) {
+        let Some((body, edges)) = self.selected_straight_edges() else {
+            return;
+        };
+        let (label, kind) = if chamfer {
+            (
+                "Chamfer",
+                FeatureKind::Chamfer {
+                    body,
+                    edges,
+                    distance: 1.0,
+                },
+            )
+        } else {
+            (
+                "Fillet",
+                FeatureKind::Fillet {
+                    body,
+                    edges,
+                    radius: 1.0,
+                },
+            )
+        };
+        let id = self.ed.apply(label, |d| d.add_feature("", kind));
+        self.sel.edges.clear();
+        self.after_feature_created(id);
+    }
+
+    pub fn cmd_shell(&mut self) {
+        let (body, open_faces) = match self.sel.face {
+            Some((b, f)) => {
+                let plane = self
+                    .ed
+                    .model()
+                    .bodies
+                    .get(&b)
+                    .and_then(|m| m.mesh.face_planes.get(f as usize).copied().flatten());
+                match plane {
+                    Some(p) => (b, vec![p]),
+                    None => {
+                        self.error("Shell openings must be flat faces");
+                        return;
+                    }
+                }
+            }
+            None => match self.sel.bodies.first() {
+                Some(&b) => (b, Vec::new()),
+                None => {
+                    self.error(
+                        "Select the face to open (or a body for a closed hollow), then Shell",
+                    );
+                    return;
+                }
+            },
+        };
+        let id = self.ed.apply("Shell", |d| {
+            d.add_feature(
+                "",
+                FeatureKind::Shell {
+                    body,
+                    open_faces,
+                    thickness: 2.0,
+                },
+            )
+        });
+        self.sel.face = None;
+        self.after_feature_created(id);
+    }
+
+    /// Sketches (other than `except`) whose curves form an open path usable by Sweep,
+    /// latest first.
+    pub fn path_sketches(&self, except: FeatureId) -> Vec<FeatureId> {
+        let doc = self.ed.doc();
+        doc.features
+            .iter()
+            .rev()
+            .filter(|f| f.id != except && matches!(f.kind, FeatureKind::Sketch { .. }))
+            .filter(|f| calibro_core::recompute::sketch_path(doc, f.id).is_ok())
+            .map(|f| f.id)
+            .collect()
+    }
+
+    pub fn cmd_sweep(&mut self) {
+        let Some((sketch, seeds)) = self.selected_regions_for_one_sketch() else {
+            self.error("Select the profile region(s) to sweep, then Sweep (the path is another sketch with an open line/arc chain)");
+            return;
+        };
+        let Some(&path) = self.path_sketches(sketch).first() else {
+            self.error(
+                "Draw the path first: a separate sketch with connected lines/arcs (an open chain)",
+            );
+            return;
+        };
+        let id = self.ed.apply("Sweep", |d| {
+            let id = d.add_feature(
+                "",
+                FeatureKind::Sweep {
+                    sketch,
+                    profiles: ProfileSelection::Seeds { points: seeds },
+                    path,
+                    body: BodyMode::NewBody,
+                },
+            );
+            for s in [sketch, path] {
+                if let Some(f) = d.feature_mut(s) {
+                    f.hidden = true;
+                }
+            }
+            id
+        });
+        self.after_feature_created(id);
+    }
+
+    pub fn cmd_loft(&mut self) {
+        let r = self.sel.regions.clone();
+        if r.len() != 2 || r[0].0 == r[1].0 {
+            self.error(
+                "Select two regions in two different sketches (Shift+click the second), then Loft",
+            );
+            return;
+        }
+        let id = self.ed.apply("Loft", |d| {
+            let id = d.add_feature(
+                "",
+                FeatureKind::Loft {
+                    from_sketch: r[0].0,
+                    from_seed: r[0].1,
+                    to_sketch: r[1].0,
+                    to_seed: r[1].1,
+                    body: BodyMode::NewBody,
+                },
+            );
+            for s in [r[0].0, r[1].0] {
+                if let Some(f) = d.feature_mut(s) {
+                    f.hidden = true;
+                }
+            }
+            id
+        });
         self.after_feature_created(id);
     }
 
@@ -956,6 +1183,12 @@ impl CalibroApp {
             if plain(Key::E) {
                 self.cmd_extrude();
             }
+            if plain(Key::Space) {
+                match self.sel.face {
+                    Some((b, f)) => self.start_sketch_on_face(b, f),
+                    None => self.info("Select a flat face first, then press Space to sketch on it"),
+                }
+            }
             if plain(Key::S) {
                 self.picking_plane = true;
                 self.info("Pick a plane: choose Top/Front/Right or click a flat face");
@@ -1123,6 +1356,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("L R C A P", "Sketch: Line, Rectangle, Circle, Arc, Polygon"),
     ("Enter", "Finish sketch"),
     ("E", "Extrude selected regions"),
+    ("Space", "Sketch on the selected flat face (camera turns to face it)"),
     ("M", "Measure"),
     ("Delete", "Delete selection"),
     ("Esc", "Cancel / step back"),

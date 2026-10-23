@@ -39,7 +39,7 @@ then `docs/FEATURE_TRACKER.md` (full scope + status), `docs/TEST_REPORT.md` (evi
 - Useful local tools used so far: `crates/calibro-io/examples/{export_samples,showcase}.rs`.
 
 ## Current state (update every session)
-_Last updated: 2026-10-23 (after commit d11b79d)._
+_Last updated: 2026-10-23 (Modify tools session)._
 - Stage 1 complete (see tracker).
 - On `main`: toolchain pinned to 1.97.0, responsive layout (panels auto-hide below 900/620 px,
   *Tools*/*Panel* toggles), window-title fix, release notes, this file.
@@ -58,6 +58,15 @@ _Last updated: 2026-10-23 (after commit d11b79d)._
   Fixed: `Document::auto_extrude_mode` switches Join↔Cut when the distance sign flips for a
   sketch made on that body's face (handle turns red with a "cut" label). Also face-sketch
   axes now follow world X (`Plane::from_origin_normal`) so H/V match the screen. 60 tests.
+- 2026-10-23 (latest): **Modify tools** added — Fillet, Chamfer (straight edges between flat
+  faces; several edges at once, not edges sharing a corner), Shell (convex flat-faced bodies,
+  open faces or closed), Sweep (profile along an open line/tangent-arc chain sketch), Loft
+  (two closed profiles). Kernel code in `crates/calibro-kernel/src/ops.rs` (module docs explain
+  the tricks: boolean nudge, tolerance ladder, sliver faces). New `FeatureKind` variants;
+  `.calibro` **FORMAT_VERSION 2** (v1 files load unchanged). UI: Shift+click selects several
+  edges (`Selection::edges`), inspector panels for each feature, toolbar buttons enabled.
+  **Space** with a flat face selected = `start_sketch_on_face` (camera faces it, ortho,
+  framed). Demo: `examples/modify-tools.calibro` (`cargo run -p calibro-io --example modify_tools`). 68 tests.
 - Not yet done: GitHub Release v0.1.0 (waiting for the owner's OK). Windows/macOS binaries
   have been built by CI but never launched on real machines.
 - Local working copies used by the 2026-10-22/23 sessions: `/home/claude/calibro` (original,
@@ -70,9 +79,13 @@ _Last updated: 2026-10-23 (after commit d11b79d)._
 3. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
    check that `release.yml` attaches the three archives.
 4. Re-check the live web app after deploy (narrow-screen layout, Tools/Panel toggles).
-5. Stage 2 (tracker §9): on-canvas dimension editing, trim/extend + curve intersection,
-   topological naming v1 for sketches on faces, planar chamfer, shell, two-profile loft,
-   3MF export, hide cylinder seam edges, capped section view.
+5. Owner feedback on the Modify tools; then extend them: fillets on edges meeting at a corner
+   (needs a corner patch), fillet/chamfer on curved edges, shell of cylinders, multi-section
+   loft, click-through UI test of Sweep/Loft creation.
+6. Stage 2 (tracker §9): on-canvas dimension editing, trim/extend + curve intersection,
+   topological naming v1 for sketches on faces (fillet edges are stored as end points, so
+   they also break when an earlier edit moves the edge), 3MF export, hide cylinder seam
+   edges, capped section view.
 
 ## Session log
 - 2026-10-22 — Stage 1 built: research, architecture, all crates, app, native format, exports,
@@ -83,3 +96,4 @@ _Last updated: 2026-10-23 (after commit d11b79d)._
 - 2026-10-23 (later) — Owner connected GitHub + installed the Claude app; pushed d11b79d; CI and Pages green; verified the live web app.
 - 2026-10-23 (later) — Built Fedora RPM + portable Linux package on request; added packaging to the release workflow (pushed to main; no release yet).
 - 2026-10-23 (later) — Shapr3D-style auto cut when extruding into a body; face-sketch axis orientation fix; rebuilt Fedora packages.
+- 2026-10-23 (later) — Fillet/Chamfer/Shell/Sweep/Loft + Space to sketch on a face (owner request); format v2; pushed to main.

@@ -14,6 +14,9 @@
 //! 3. `face_planes` / face ids / edge polylines — picking and interaction data.
 
 use calibro_sketch::{Profile, Segment};
+
+mod ops;
+pub use ops::{chamfer, fillet, loft, shell, sweep, PathSegment};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use truck_meshalgo::prelude::*;
@@ -455,18 +458,37 @@ pub enum BooleanOp {
 /// Tolerance passed to truck's boolean engine (model units, mm).
 pub const BOOLEAN_TOLERANCE: f64 = 0.05;
 
+/// Boolean operation. If truck fails at the default tolerance, the same operation
+/// is retried with finer tolerances, which resolves many near-degenerate cases.
 pub fn boolean(a: &Solid, b: &Solid, op: BooleanOp) -> Result<Solid> {
-    guarded("boolean", || boolean_unguarded(a, b, op))
+    boolean_ladder(a, b, op, &[BOOLEAN_TOLERANCE, 0.01, 0.002])
 }
 
-fn boolean_unguarded(a: &Solid, b: &Solid, op: BooleanOp) -> Result<Solid> {
+/// Tries each tolerance in order and returns the first valid result.
+pub fn boolean_ladder(a: &Solid, b: &Solid, op: BooleanOp, tolerances: &[f64]) -> Result<Solid> {
+    let mut last = KernelError::BooleanFailed;
+    for &tol in tolerances {
+        match boolean_tol(a, b, op, tol) {
+            Ok(s) => return Ok(s),
+            Err(e) => last = e,
+        }
+    }
+    Err(last)
+}
+
+/// Boolean with an explicit tolerance (smaller = more precise, slower).
+pub fn boolean_tol(a: &Solid, b: &Solid, op: BooleanOp, tol: f64) -> Result<Solid> {
+    guarded("boolean", || boolean_unguarded(a, b, op, tol))
+}
+
+fn boolean_unguarded(a: &Solid, b: &Solid, op: BooleanOp, tol: f64) -> Result<Solid> {
     let res = match op {
-        BooleanOp::Union => truck_shapeops::or(a, b, BOOLEAN_TOLERANCE),
-        BooleanOp::Intersect => truck_shapeops::and(a, b, BOOLEAN_TOLERANCE),
+        BooleanOp::Union => truck_shapeops::or(a, b, tol),
+        BooleanOp::Intersect => truck_shapeops::and(a, b, tol),
         BooleanOp::Subtract => {
             let mut nb = b.clone();
             nb.not();
-            truck_shapeops::and(a, &nb, BOOLEAN_TOLERANCE)
+            truck_shapeops::and(a, &nb, tol)
         }
     }
     .ok_or(KernelError::BooleanFailed)?;

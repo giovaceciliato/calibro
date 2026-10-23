@@ -25,7 +25,8 @@ use std::io::{Cursor, Read, Seek, Write};
 pub const EXTENSION: &str = "calibro";
 pub const MIME_TYPE: &str = "application/vnd.calibro.project";
 pub const FORMAT_NAME: &str = "calibro-project";
-pub const FORMAT_VERSION: u32 = 1;
+/// 2: added Fillet, Chamfer, Shell, Sweep and Loft features (v1 files load unchanged).
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -118,6 +119,8 @@ pub fn migrate(
 ) -> Result<serde_json::Value, ProjectError> {
     match from_version {
         FORMAT_VERSION => Ok(value),
+        // v1 -> v2 only added new feature kinds; existing data is identical.
+        1 => Ok(value),
         // Future: 1 => migrate_1_to_2(value) ...
         v => Err(ProjectError::UnsupportedVersion {
             found: v,
@@ -311,6 +314,42 @@ mod tests {
             .volume();
         let exp = (600.0 - std::f64::consts::PI * 16.0) * 12.0;
         assert!((v - exp).abs() / exp < 5e-3, "{v} vs {exp}");
+    }
+
+    #[test]
+    fn format_v1_files_still_open() {
+        // A v1 project (written before Fillet/Shell/... existed) must load in v2.
+        let mut doc = Document::new();
+        doc.add_feature(
+            "",
+            FeatureKind::Primitive {
+                primitive: Primitive::Box {
+                    min: [0.0; 3],
+                    size: [1.0; 3],
+                },
+                body: BodyMode::NewBody,
+            },
+        );
+        let mut buf = Cursor::new(Vec::new());
+        {
+            let mut z = zip::ZipWriter::new(&mut buf);
+            let o = zip::write::SimpleFileOptions::default();
+            z.start_file("mimetype", o).unwrap();
+            z.write_all(MIME_TYPE.as_bytes()).unwrap();
+            z.start_file("manifest.json", o).unwrap();
+            let m = Manifest {
+                format: FORMAT_NAME.into(),
+                format_version: 1,
+                app_version: "0.1.0".into(),
+                document: "document.json".into(),
+                resources: vec![],
+            };
+            z.write_all(&serde_json::to_vec(&m).unwrap()).unwrap();
+            z.start_file("document.json", o).unwrap();
+            z.write_all(&serde_json::to_vec(&doc).unwrap()).unwrap();
+            z.finish().unwrap();
+        }
+        assert_eq!(load_from_bytes(buf.get_ref()).unwrap(), doc);
     }
 
     #[test]

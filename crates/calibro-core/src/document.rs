@@ -203,6 +203,41 @@ pub enum FeatureKind {
     ImportedMesh {
         resource: String,
     },
+    /// Rounds straight edges between flat faces. Edges are stored by their end
+    /// points so they can be found again after earlier features change.
+    Fillet {
+        body: BodyId,
+        edges: Vec<[[f64; 3]; 2]>,
+        radius: f64,
+    },
+    /// Bevels straight edges between flat faces by `distance` along each face.
+    Chamfer {
+        body: BodyId,
+        edges: Vec<[[f64; 3]; 2]>,
+        distance: f64,
+    },
+    /// Hollows a body, leaving walls of `thickness`; `open_faces` are removed.
+    Shell {
+        body: BodyId,
+        open_faces: Vec<Plane>,
+        thickness: f64,
+    },
+    /// Sweeps sketch regions along the curves of another sketch (a smooth chain
+    /// of lines and arcs).
+    Sweep {
+        sketch: FeatureId,
+        profiles: ProfileSelection,
+        path: FeatureId,
+        body: BodyMode,
+    },
+    /// Lofts between one region of each of two sketches.
+    Loft {
+        from_sketch: FeatureId,
+        from_seed: [f64; 2],
+        to_sketch: FeatureId,
+        to_seed: [f64; 2],
+        body: BodyMode,
+    },
 }
 
 impl FeatureKind {
@@ -227,6 +262,11 @@ impl FeatureKind {
             FeatureKind::Mirror { .. } => "Mirror",
             FeatureKind::ImportedSolid { .. } => "Imported solid",
             FeatureKind::ImportedMesh { .. } => "Imported mesh",
+            FeatureKind::Fillet { .. } => "Fillet",
+            FeatureKind::Chamfer { .. } => "Chamfer",
+            FeatureKind::Shell { .. } => "Shell",
+            FeatureKind::Sweep { .. } => "Sweep",
+            FeatureKind::Loft { .. } => "Loft",
         }
     }
 
@@ -237,6 +277,8 @@ impl FeatureKind {
         match self {
             FeatureKind::Extrude { body: m, .. }
             | FeatureKind::Revolve { body: m, .. }
+            | FeatureKind::Sweep { body: m, .. }
+            | FeatureKind::Loft { body: m, .. }
             | FeatureKind::Primitive { body: m, .. } => {
                 if let Some(t) = m.target() {
                     body(&t);
@@ -249,12 +291,27 @@ impl FeatureKind {
             FeatureKind::Transform { bodies, .. } => bodies.iter().for_each(&mut body),
             FeatureKind::LinearPattern { body: b, .. }
             | FeatureKind::CircularPattern { body: b, .. }
-            | FeatureKind::Mirror { body: b, .. } => body(b),
+            | FeatureKind::Mirror { body: b, .. }
+            | FeatureKind::Fillet { body: b, .. }
+            | FeatureKind::Chamfer { body: b, .. }
+            | FeatureKind::Shell { body: b, .. } => body(b),
             _ => {}
         }
         match self {
             FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } => {
                 deps.push(*sketch)
+            }
+            FeatureKind::Sweep { sketch, path, .. } => {
+                deps.push(*sketch);
+                deps.push(*path);
+            }
+            FeatureKind::Loft {
+                from_sketch,
+                to_sketch,
+                ..
+            } => {
+                deps.push(*from_sketch);
+                deps.push(*to_sketch);
             }
             _ => {}
         }

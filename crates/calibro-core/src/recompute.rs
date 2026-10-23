@@ -622,6 +622,142 @@ impl Engine {
                 self.insert_new(model, f.id, key, outs, used_mesh_keys);
                 Ok(FeatureStatus::Ok)
             }
+            FeatureKind::Fillet {
+                body,
+                edges,
+                radius,
+            } => {
+                if edges.is_empty() {
+                    return Err("select one or more edges to fillet".into());
+                }
+                let (s, _) = Self::input_solid(model, *body)?;
+                let out = self.cached(key, used_solid_keys, || {
+                    Ok(vec![
+                        kernel::fillet(&s, edges, *radius).map_err(|e| e.to_string())?
+                    ])
+                })?;
+                self.replace_body(
+                    model,
+                    *body,
+                    key,
+                    out.into_iter().next().unwrap(),
+                    used_mesh_keys,
+                );
+                Ok(FeatureStatus::Ok)
+            }
+            FeatureKind::Chamfer {
+                body,
+                edges,
+                distance,
+            } => {
+                if edges.is_empty() {
+                    return Err("select one or more edges to chamfer".into());
+                }
+                let (s, _) = Self::input_solid(model, *body)?;
+                let out = self.cached(key, used_solid_keys, || {
+                    Ok(vec![
+                        kernel::chamfer(&s, edges, *distance).map_err(|e| e.to_string())?
+                    ])
+                })?;
+                self.replace_body(
+                    model,
+                    *body,
+                    key,
+                    out.into_iter().next().unwrap(),
+                    used_mesh_keys,
+                );
+                Ok(FeatureStatus::Ok)
+            }
+            FeatureKind::Shell {
+                body,
+                open_faces,
+                thickness,
+            } => {
+                let (s, _) = Self::input_solid(model, *body)?;
+                let out = self.cached(key, used_solid_keys, || {
+                    Ok(vec![
+                        kernel::shell(&s, open_faces, *thickness).map_err(|e| e.to_string())?
+                    ])
+                })?;
+                self.replace_body(
+                    model,
+                    *body,
+                    key,
+                    out.into_iter().next().unwrap(),
+                    used_mesh_keys,
+                );
+                Ok(FeatureStatus::Ok)
+            }
+            FeatureKind::Sweep {
+                sketch,
+                profiles,
+                path,
+                body,
+            } => {
+                let solids = self.cached(key, used_solid_keys, || {
+                    let (plane, profs) = Self::sketch_profiles(doc, model, *sketch, profiles)?;
+                    let segs = sketch_path(doc, *path)?;
+                    profs
+                        .iter()
+                        .map(|p| {
+                            kernel::sweep(&plane, p, &segs, p.interior_point())
+                                .map_err(|e| e.to_string())
+                        })
+                        .collect()
+                })?;
+                self.apply_mode(
+                    model,
+                    f.id,
+                    key,
+                    solids,
+                    *body,
+                    used_solid_keys,
+                    used_mesh_keys,
+                )?;
+                Ok(FeatureStatus::Ok)
+            }
+            FeatureKind::Loft {
+                from_sketch,
+                from_seed,
+                to_sketch,
+                to_seed,
+                body,
+            } => {
+                if from_sketch == to_sketch {
+                    return Err("choose regions from two different sketches".into());
+                }
+                let solids = self.cached(key, used_solid_keys, || {
+                    let (pa, a) = Self::sketch_profiles(
+                        doc,
+                        model,
+                        *from_sketch,
+                        &ProfileSelection::Seeds {
+                            points: vec![*from_seed],
+                        },
+                    )?;
+                    let (pb, b) = Self::sketch_profiles(
+                        doc,
+                        model,
+                        *to_sketch,
+                        &ProfileSelection::Seeds {
+                            points: vec![*to_seed],
+                        },
+                    )?;
+                    Ok(vec![
+                        kernel::loft(&pa, &a[0], &pb, &b[0]).map_err(|e| e.to_string())?
+                    ])
+                })?;
+                self.apply_mode(
+                    model,
+                    f.id,
+                    key,
+                    solids,
+                    *body,
+                    used_solid_keys,
+                    used_mesh_keys,
+                )?;
+                Ok(FeatureStatus::Ok)
+            }
             FeatureKind::ImportedSolid { resource } => {
                 let bytes = doc
                     .resources
@@ -668,6 +804,29 @@ impl Engine {
                 Ok(FeatureStatus::Ok)
             }
         }
+    }
+
+    /// Stores a modified version of an existing body under the same id.
+    fn replace_body(
+        &mut self,
+        model: &mut Model,
+        id: BodyId,
+        key: u64,
+        s: Solid,
+        used_mesh_keys: &mut Vec<u64>,
+    ) {
+        let k = hash_of(&(key, "replace"));
+        let mesh = self.mesh_for(k, &s);
+        used_mesh_keys.push(k);
+        model.bodies.insert(
+            id,
+            EvaluatedBody {
+                id,
+                geometry: BodyGeometry::Solid(s),
+                mesh,
+                key: k,
+            },
+        );
     }
 
     fn insert_new(
@@ -726,4 +885,91 @@ impl Engine {
         );
         Ok(v)
     }
+}
+
+/// Turns the non-construction curves of a sketch into one ordered, connected path.
+pub fn sketch_path(
+    doc: &Document,
+    sketch_id: FeatureId,
+) -> Result<Vec<kernel::PathSegment>, String> {
+    use calibro_sketch::CurveKind;
+    let f = doc
+        .feature(sketch_id)
+        .ok_or("the path sketch was deleted")?;
+    let FeatureKind::Sketch { plane, sketch, .. } = &f.kind else {
+        return Err("the path must be a sketch".into());
+    };
+    let mut s = sketch.clone();
+    let _ = calibro_sketch::solve(&mut s);
+    let w = |p: [f64; 2]| plane.to_world(p);
+    struct Seg {
+        a: [f64; 2],
+        b: [f64; 2],
+        center: Option<[f64; 2]>,
+    }
+    let mut segs: Vec<Seg> = Vec::new();
+    for c in s.curves.values().filter(|c| !c.construction) {
+        match c.kind {
+            CurveKind::Line { a, b } => segs.push(Seg {
+                a: s.points[&a].xy(),
+                b: s.points[&b].xy(),
+                center: None,
+            }),
+            CurveKind::Arc { center, start, end } => segs.push(Seg {
+                a: s.points[&start].xy(),
+                b: s.points[&end].xy(),
+                center: Some(s.points[&center].xy()),
+            }),
+            CurveKind::Circle { .. } => return Err("a path cannot contain full circles".into()),
+        }
+    }
+    if segs.is_empty() {
+        return Err("the path sketch has no curves".into());
+    }
+    let close = |p: [f64; 2], q: [f64; 2]| (p[0] - q[0]).abs() < 1e-6 && (p[1] - q[1]).abs() < 1e-6;
+    let degree = |p: [f64; 2]| {
+        segs.iter()
+            .filter(|g| close(g.a, p) || close(g.b, p))
+            .count()
+    };
+    let start = segs
+        .iter()
+        .flat_map(|g| [g.a, g.b])
+        .find(|p| degree(*p) == 1)
+        .ok_or("the path must be an open chain (closed paths are not supported yet)")?;
+    let mut used = vec![false; segs.len()];
+    let mut cur = start;
+    let mut out = Vec::new();
+    for _ in 0..segs.len() {
+        let Some(i) =
+            (0..segs.len()).find(|&i| !used[i] && (close(segs[i].a, cur) || close(segs[i].b, cur)))
+        else {
+            break;
+        };
+        used[i] = true;
+        let g = &segs[i];
+        let forward = close(g.a, cur);
+        let (from, to) = if forward { (g.a, g.b) } else { (g.b, g.a) };
+        match g.center {
+            None => out.push(kernel::PathSegment::Line {
+                from: w(from),
+                to: w(to),
+            }),
+            Some(c) => {
+                let (_, sweep) = calibro_sketch::profile::arc_angles(c, g.a, g.b, true);
+                out.push(kernel::PathSegment::Arc {
+                    from: w(from),
+                    to: w(to),
+                    center: w(c),
+                    axis: plane.normal(),
+                    angle: if forward { sweep } else { -sweep },
+                });
+            }
+        }
+        cur = to;
+    }
+    if used.iter().any(|u| !u) {
+        return Err("the path curves must form a single connected chain".into());
+    }
+    Ok(out)
 }

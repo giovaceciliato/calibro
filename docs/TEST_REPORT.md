@@ -104,3 +104,17 @@ Not done: opening the files in Blender, Fusion, Maya, 3ds Max or Cinema 4D (not 
 | CI | ❌ Clippy step failed on GitHub (stable = Rust 1.99.1, newer lints than the tested 1.97.0) → fixed by pinning `rust-toolchain.toml` to 1.97.0 in all workflows |
 | Issues found in the browser and fixed | window title re-sent every frame (console flooded) → only when it changes, `document.title` on web; side panels squeezed the viewport on narrow screens → compact widths, auto-hide below 900/620 px, *Tools*/*Panel* toggles; view bar overlapped the inspector → wraps within the viewport |
 | After the fixes (local, Rust 1.97.0) | ✅ fmt, clippy `-D warnings`, 58 tests, release build, UI toggles checked on Xvfb |
+
+## 7. Update — 23 Oct 2026 (Modify tools, sketch-on-face with Space)
+
+| Item | Result |
+|---|---|
+| New kernel ops (`calibro-kernel/src/ops.rs`): fillet, chamfer, shell, sweep, loft | ✅ 6 new kernel tests (volumes checked against analytic values; refusals checked) |
+| New features in history + format v2 (`Fillet`, `Chamfer`, `Shell`, `Sweep`, `Loft`) | ✅ core tests `modify_features_fillet_chamfer_shell` (incl. parametric thickness edit, shell after chamfer, edge that disappears → clear failure) and `sweep_and_loft_features`; project test `format_v1_files_still_open` + round trip with the new features |
+| Full suite (Rust stable locally, lavapipe) | ✅ fmt, clippy `-D warnings`, **68 passed**, 1 ignored |
+| UI on Xvfb: box → click edge, Shift+click a second edge → *Chamfer* → both edges bevelled; click top face → *Shell* → open tray | ✅ `docs/images/shell-chamfer.png` (found and fixed: shell refused chamfered boxes because of the tool's hair-thin sliver faces) |
+| UI: box → *Fillet* on one edge | ✅ |
+| UI: click a side face → **Space** → sketch starts on that face, ortho camera looks straight at it, face centred and framed | ✅ |
+| UI: `examples/modify-tools.calibro` (tray, swept pipe, loft) opened from the command line; Sweep inspector with path selector | ✅ `docs/images/modify-tools.png` |
+| UI: creating Sweep/Loft by clicking regions and the toolbar buttons | ⚠️ Not clicked through on Xvfb (command code reviewed; the features themselves are tested) |
+| Note for testers | xdotool keys/modifiers only reach the window after `xdotool windowfocus` (no window manager on Xvfb) |

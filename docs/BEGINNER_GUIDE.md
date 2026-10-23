@@ -183,7 +183,7 @@ Build and run Calibro from inside the toolbox; graphics work normally from there
 5. The built program is saved as `target/release/calibro` (`calibro.exe` on Windows); you can
    run that file directly next time.
 
-Optional checks: `cargo test --workspace` runs all automated tests (58 tests; every line should end in `ok`).
+Optional checks: `cargo test --workspace` runs all automated tests (68 tests; every line should end in `ok`).
 
 ### Run the browser version on your own computer (optional)
 ```

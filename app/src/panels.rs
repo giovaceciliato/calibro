@@ -479,16 +479,21 @@ impl CalibroApp {
                     if tool_btn(ui, false, "Mirror", "Mirror copy across a plane") {
                         self.cmd_on_selected_bodies("Mirror", |b| FeatureKind::Mirror { body: b[0], plane: Plane::YZ });
                     }
-                    ui.add_enabled_ui(false, |ui| {
-                        for (l, why) in [
-                            ("Fillet", "Planned: the truck kernel has no fillet operation yet (see FEATURE_TRACKER.md)"),
-                            ("Chamfer", "Planned: needs kernel support (see FEATURE_TRACKER.md)"),
-                            ("Shell", "Planned: needs offset surfaces in the kernel (see FEATURE_TRACKER.md)"),
-                            ("Sweep / Loft", "Planned: kernel has the building blocks, feature not implemented yet"),
-                        ] {
-                            ui.add_sized([w, 24.0], egui::Button::new(l)).on_disabled_hover_text(why);
-                        }
-                    });
+                    if tool_btn(ui, false, "Fillet", "Round the selected straight edges (Shift+click for more edges)") {
+                        self.cmd_fillet(false);
+                    }
+                    if tool_btn(ui, false, "Chamfer", "Bevel the selected straight edges") {
+                        self.cmd_fillet(true);
+                    }
+                    if tool_btn(ui, false, "Shell", "Hollow a body: select the face to open (or a body for a closed hollow)") {
+                        self.cmd_shell();
+                    }
+                    if tool_btn(ui, false, "Sweep", "Sweep the selected profile region along a path sketch (open line/arc chain)") {
+                        self.cmd_sweep();
+                    }
+                    if tool_btn(ui, false, "Loft", "Blend between two regions in two sketches (Shift+click the second)") {
+                        self.cmd_loft();
+                    }
                 });
             });
         });
@@ -721,6 +726,12 @@ impl CalibroApp {
                 if ui.button("Revolve").clicked() {
                     self.cmd_revolve();
                 }
+                if ui.button("Sweep").clicked() {
+                    self.cmd_sweep();
+                }
+                if ui.button("Loft").clicked() {
+                    self.cmd_loft();
+                }
             });
             return;
         }
@@ -731,13 +742,24 @@ impl CalibroApp {
         if let Some((b, face)) = self.sel.face {
             self.face_inspector(ui, b, face);
         }
-        if let Some((b, e)) = self.sel.edge {
+        if let Some(&(b, e)) = self.sel.edges.last() {
             if let Some(body) = self.ed.model().bodies.get(&b) {
                 if let Some(pl) = body.mesh.edges.get(e) {
                     let len = crate::picking::polyline_length(pl);
                     ui.label(format!("Edge length: {}", self.fmt_len(len)));
                 }
             }
+            ui.label(format!("{} edge(s) selected", self.sel.edges.len()));
+            ui.horizontal(|ui| {
+                if ui.button("Fillet").clicked() {
+                    self.cmd_fillet(false);
+                }
+                if ui.button("Chamfer").clicked() {
+                    self.cmd_fillet(true);
+                }
+            });
+            ui.weak("Shift+click adds more edges.");
+            ui.separator();
         }
         if !self.sel.bodies.is_empty() {
             let bodies = self.sel.bodies.clone();
@@ -844,9 +866,22 @@ impl CalibroApp {
                 "Planar, normal ({:.3}, {:.3}, {:.3})",
                 n[0], n[1], n[2]
             ));
-            if ui.button("Sketch on this face").clicked() {
-                self.start_sketch(pl, Some(b));
-            }
+            ui.horizontal(|ui| {
+                if ui
+                    .button("Sketch on this face")
+                    .on_hover_text("Space")
+                    .clicked()
+                {
+                    self.start_sketch_on_face(b, face);
+                }
+                if ui
+                    .button("Shell")
+                    .on_hover_text("Hollow the body, opening this face")
+                    .clicked()
+                {
+                    self.cmd_shell();
+                }
+            });
         } else {
             ui.weak("Curved face");
         }
@@ -1214,6 +1249,121 @@ impl CalibroApp {
                     ui.label("Plane");
                     changed |= plane_combo(ui, &format!("mp{fid}"), plane);
                 });
+            }
+            FeatureKind::Fillet {
+                body,
+                edges,
+                radius,
+            }
+            | FeatureKind::Chamfer {
+                body,
+                edges,
+                distance: radius,
+            } => {
+                let is_fillet = matches!(f.kind, FeatureKind::Fillet { .. });
+                ui.label(format!("Body: {}", self.body_name(*body)));
+                ui.horizontal(|ui| {
+                    ui.label(if is_fillet { "Radius" } else { "Distance" });
+                    changed |= length_edit(ui, radius, units);
+                });
+                ui.label(format!("{} edge(s)", edges.len()));
+                let same_body =
+                    !self.sel.edges.is_empty() && self.sel.edges.iter().all(|e| e.0 == *body);
+                if ui
+                    .add_enabled(same_body, egui::Button::new("Use selected edges"))
+                    .on_disabled_hover_text("Select edges of this body in the viewport first")
+                    .clicked()
+                {
+                    if let Some((_, e)) = self.selected_straight_edges() {
+                        *edges = e;
+                        changed = true;
+                    }
+                }
+                ui.weak("Straight edges between flat faces; edges meeting at a corner are not supported yet.");
+            }
+            FeatureKind::Shell {
+                body,
+                open_faces,
+                thickness,
+            } => {
+                ui.label(format!("Body: {}", self.body_name(*body)));
+                ui.horizontal(|ui| {
+                    ui.label("Thickness");
+                    changed |= length_edit(ui, thickness, units);
+                });
+                ui.label(format!("{} open face(s)", open_faces.len()));
+                let sel_plane = self.sel.face.filter(|f| f.0 == *body).and_then(|(b, fi)| {
+                    self.ed
+                        .model()
+                        .bodies
+                        .get(&b)
+                        .and_then(|m| m.mesh.face_planes.get(fi as usize).copied().flatten())
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(sel_plane.is_some(), egui::Button::new("Open selected face"))
+                        .on_disabled_hover_text("Click a flat face of this body first")
+                        .clicked()
+                    {
+                        open_faces.push(sel_plane.unwrap());
+                        changed = true;
+                    }
+                    if ui
+                        .add_enabled(!open_faces.is_empty(), egui::Button::new("Close all"))
+                        .clicked()
+                    {
+                        open_faces.clear();
+                        changed = true;
+                    }
+                });
+                ui.weak("Works on convex bodies with flat faces (boxes, prisms).");
+            }
+            FeatureKind::Sweep {
+                sketch, path, body, ..
+            } => {
+                let name = |id: FeatureId| {
+                    self.ed
+                        .doc()
+                        .feature(id)
+                        .map(|f| f.name.clone())
+                        .unwrap_or_default()
+                };
+                ui.label(format!("Profile: {}", name(*sketch)));
+                let options = self.path_sketches(*sketch);
+                ui.horizontal(|ui| {
+                    ui.label("Path");
+                    egui::ComboBox::from_id_salt(("path", fid))
+                        .selected_text(name(*path))
+                        .show_ui(ui, |ui| {
+                            for o in options {
+                                if ui.selectable_label(*path == o, name(o)).clicked() {
+                                    *path = o;
+                                    changed = true;
+                                }
+                            }
+                        });
+                });
+                changed |= self.body_mode_ui(ui, body, fid);
+                ui.weak(
+                    "The path must be smooth (arcs tangent to lines) and start at the profile.",
+                );
+            }
+            FeatureKind::Loft {
+                from_sketch,
+                to_sketch,
+                body,
+                ..
+            } => {
+                let name = |id: FeatureId| {
+                    self.ed
+                        .doc()
+                        .feature(id)
+                        .map(|f| f.name.clone())
+                        .unwrap_or_default()
+                };
+                ui.label(format!("From: {}", name(*from_sketch)));
+                ui.label(format!("To: {}", name(*to_sketch)));
+                changed |= self.body_mode_ui(ui, body, fid);
             }
             FeatureKind::ImportedMesh { resource } | FeatureKind::ImportedSolid { resource } => {
                 ui.label(format!("Stored in the project as '{resource}'"));

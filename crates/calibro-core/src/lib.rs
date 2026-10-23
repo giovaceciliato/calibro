@@ -336,6 +336,217 @@ mod tests {
     }
 
     #[test]
+    fn modify_features_fillet_chamfer_shell() {
+        let mut doc = Document::new();
+        let b = doc.add_feature(
+            "",
+            FeatureKind::Primitive {
+                primitive: Primitive::Box {
+                    min: [0.0; 3],
+                    size: [40.0, 30.0, 20.0],
+                },
+                body: BodyMode::NewBody,
+            },
+        );
+        let body = BodyId {
+            feature: b,
+            index: 0,
+        };
+        let sh = doc.add_feature(
+            "",
+            FeatureKind::Shell {
+                body,
+                open_faces: vec![Plane {
+                    origin: [0.0, 0.0, 20.0],
+                    ..Plane::XY
+                }],
+                thickness: 2.0,
+            },
+        );
+        let ch = doc.add_feature(
+            "",
+            FeatureKind::Chamfer {
+                body,
+                edges: vec![[[0.0, 0.0, 0.0], [40.0, 0.0, 0.0]]],
+                distance: 1.0,
+            },
+        );
+        let fi = doc.add_feature(
+            "",
+            FeatureKind::Fillet {
+                body,
+                edges: vec![[[40.0, 0.0, 0.0], [40.0, 30.0, 0.0]]],
+                radius: 1.0,
+            },
+        );
+        let mut ed = Editor::new(doc);
+        for id in [sh, ch, fi] {
+            assert_eq!(
+                ed.model().status[&id],
+                FeatureStatus::Ok,
+                "{:?}",
+                ed.model().status[&id]
+            );
+        }
+        let v = vol(&ed, body);
+        let shelled = 24000.0 - 36.0 * 26.0 * 18.0;
+        assert!(v < shelled && v > shelled - 60.0, "{v}");
+        // parametric: thicker walls -> more material
+        ed.apply("thicker", |d| {
+            if let FeatureKind::Shell { thickness, .. } = &mut d.feature_mut(sh).unwrap().kind {
+                *thickness = 3.0;
+            }
+        });
+        assert!(vol(&ed, body) > v);
+        // shell after a chamfer (the chamfer leaves hair-thin steps; still convex)
+        let sh2 = ed.apply("shell after chamfer", |d| {
+            d.feature_mut(sh).unwrap().suppressed = true;
+            d.feature_mut(fi).unwrap().suppressed = true; // fillets make curved faces
+            d.add_feature(
+                "",
+                FeatureKind::Shell {
+                    body,
+                    open_faces: vec![Plane {
+                        origin: [0.0, 0.0, 20.0],
+                        ..Plane::XY
+                    }],
+                    thickness: 2.0,
+                },
+            )
+        });
+        assert_eq!(
+            ed.model().status[&sh2],
+            FeatureStatus::Ok,
+            "{:?}",
+            ed.model().status[&sh2]
+        );
+        ed.apply("unsuppress", |d| {
+            d.feature_mut(sh).unwrap().suppressed = false;
+            d.feature_mut(fi).unwrap().suppressed = false;
+            d.feature_mut(sh2).unwrap().suppressed = true;
+        });
+        // an edge that disappears after an earlier edit fails with a clear reason
+        ed.apply("resize", |d| {
+            if let FeatureKind::Primitive {
+                primitive: Primitive::Box { size, .. },
+                ..
+            } = &mut d.feature_mut(b).unwrap().kind
+            {
+                size[0] = 50.0;
+            }
+        });
+        assert!(ed.model().status[&fi].is_failed());
+    }
+
+    #[test]
+    fn sweep_and_loft_features() {
+        use calibro_sketch::Sketch;
+        let mut doc = Document::new();
+        // profile: circle r=2 on the XZ plane at the origin
+        let mut prof = Sketch::new();
+        prof.add_circle([0.0, 0.0], 2.0);
+        let ps = doc.add_feature(
+            "",
+            FeatureKind::Sketch {
+                plane: Plane::XZ,
+                sketch: prof,
+                on_body: None,
+            },
+        );
+        // path on the XY plane: line along +Y then a quarter arc turning to +X
+        let mut path = Sketch::new();
+        let a = path.add_point(0.0, 0.0);
+        let b = path.add_point(0.0, 20.0);
+        let c = path.add_point(10.0, 30.0);
+        let ctr = path.add_point(10.0, 20.0);
+        path.add_line(a, b);
+        path.add_arc(ctr, c, b); // CCW from c to b == clockwise from b to c
+        let pp = doc.add_feature(
+            "",
+            FeatureKind::Sketch {
+                plane: Plane::XY,
+                sketch: path,
+                on_body: None,
+            },
+        );
+        let sw = doc.add_feature(
+            "",
+            FeatureKind::Sweep {
+                sketch: ps,
+                profiles: ProfileSelection::All,
+                path: pp,
+                body: BodyMode::NewBody,
+            },
+        );
+        // loft between a square at z=0 and a smaller square at z=10
+        let mut s1 = Sketch::new();
+        s1.add_rectangle([30.0, 0.0], [40.0, 10.0]);
+        let l1 = doc.add_feature(
+            "",
+            FeatureKind::Sketch {
+                plane: Plane::XY,
+                sketch: s1,
+                on_body: None,
+            },
+        );
+        let mut s2 = Sketch::new();
+        s2.add_rectangle([32.0, 2.0], [38.0, 8.0]);
+        let l2 = doc.add_feature(
+            "",
+            FeatureKind::Sketch {
+                plane: Plane {
+                    origin: [0.0, 0.0, 10.0],
+                    ..Plane::XY
+                },
+                sketch: s2,
+                on_body: None,
+            },
+        );
+        let lo = doc.add_feature(
+            "",
+            FeatureKind::Loft {
+                from_sketch: l1,
+                from_seed: [35.0, 5.0],
+                to_sketch: l2,
+                to_seed: [35.0, 5.0],
+                body: BodyMode::NewBody,
+            },
+        );
+        let ed = Editor::new(doc);
+        assert_eq!(
+            ed.model().status[&sw],
+            FeatureStatus::Ok,
+            "{:?}",
+            ed.model().status[&sw]
+        );
+        assert_eq!(
+            ed.model().status[&lo],
+            FeatureStatus::Ok,
+            "{:?}",
+            ed.model().status[&lo]
+        );
+        let pi = std::f64::consts::PI;
+        let vs = vol(
+            &ed,
+            BodyId {
+                feature: sw,
+                index: 0,
+            },
+        );
+        let exp = pi * 4.0 * (20.0 + pi / 2.0 * 10.0);
+        assert!((vs - exp).abs() / exp < 2e-2, "sweep {vs} vs {exp}");
+        let vl = vol(
+            &ed,
+            BodyId {
+                feature: lo,
+                index: 0,
+            },
+        );
+        let expl = 10.0 / 3.0 * (100.0 + 36.0 + 60.0);
+        assert!((vl - expl).abs() / expl < 1e-3, "loft {vl} vs {expl}");
+    }
+
+    #[test]
     fn rollback_marker() {
         let (mut doc, _, ex, _) = plate_doc();
         doc.rollback = Some(1);

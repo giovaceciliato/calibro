@@ -367,12 +367,8 @@ impl CalibroApp {
         if self.picking_plane {
             if let Some(f) = face {
                 let mesh = &self.ed.model().bodies[&f.body].mesh;
-                if let Some(Some(pl)) = mesh.face_planes.get(f.face as usize) {
-                    // keep sketch coordinates aligned with the world origin
-                    let n = DVec3::from(pl.normal());
-                    let o = n * n.dot(DVec3::from(pl.origin));
-                    let plane = Plane::from_origin_normal(o.to_array(), n.to_array());
-                    self.start_sketch(plane, Some(f.body));
+                if let Some(Some(_)) = mesh.face_planes.get(f.face as usize) {
+                    self.start_sketch_on_face(f.body, f.face);
                 } else {
                     self.error("That face is curved — pick a flat face or a standard plane");
                 }
@@ -391,7 +387,12 @@ impl CalibroApp {
                     if !add {
                         self.sel = Selection::default();
                     }
-                    self.sel.edge = Some((e.body, e.edge));
+                    let key = (e.body, e.edge);
+                    if let Some(i) = self.sel.edges.iter().position(|x| *x == key) {
+                        self.sel.edges.remove(i);
+                    } else {
+                        self.sel.edges.push(key);
+                    }
                     if !self.sel.bodies.contains(&e.body) {
                         self.sel.bodies.push(e.body);
                     }
@@ -1194,7 +1195,7 @@ impl CalibroApp {
         }
 
         let mut overlay = Vec::new();
-        if let Some((b, e)) = self.sel.edge {
+        for &(b, e) in &self.sel.edges {
             if let Some(pl) = self
                 .ed
                 .model()

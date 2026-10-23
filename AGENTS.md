@@ -67,7 +67,12 @@ _Last updated: 2026-10-23 (Modify tools session)._
   edges (`Selection::edges`), inspector panels for each feature, toolbar buttons enabled.
   **Space** with a flat face selected = `start_sketch_on_face` (camera faces it, ortho,
   framed). Demo: `examples/modify-tools.calibro` (`cargo run -p calibro-io --example modify_tools`). 68 tests.
-- Not yet done: GitHub Release v0.1.0 (waiting for the owner's OK). Windows/macOS binaries
+- Owner gave the OK for release v0.1.0 (2026-10-23). The AI session could NOT create it:
+  pushing tags and the releases API are blocked for Claude sessions (HTTP 403). The owner
+  creates it on github.com (Releases → Draft a new release → new tag `v0.1.0` on `main` →
+  Publish). The tag push starts `release.yml`, which now uses `RELEASE_NOTES.md` as the text
+  and attaches the Windows zip, macOS tar.gz, Linux tar.gz, Fedora RPM and portable package.
+- Not yet done: check the published release assets; GitHub Release v0.1.0 (waiting for the owner's OK). Windows/macOS binaries
   have been built by CI but never launched on real machines.
 - Local working copies used by the 2026-10-22/23 sessions: `/home/claude/calibro` (original,
   not a git repo) and `/home/claude/calibro-gh` (git clone of GitHub). In a new session just
@@ -97,3 +102,4 @@ _Last updated: 2026-10-23 (Modify tools session)._
 - 2026-10-23 (later) — Built Fedora RPM + portable Linux package on request; added packaging to the release workflow (pushed to main; no release yet).
 - 2026-10-23 (later) — Shapr3D-style auto cut when extruding into a body; face-sketch axis orientation fix; rebuilt Fedora packages.
 - 2026-10-23 (later) — Fillet/Chamfer/Shell/Sweep/Loft + Space to sketch on a face (owner request); format v2; pushed to main.
+- 2026-10-23 (later) — Release requested; tag push/release API refused for the AI session (403). release.yml now sets name + body from RELEASE_NOTES.md; owner to publish v0.1.0 from the web UI.

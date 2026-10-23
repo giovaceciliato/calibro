@@ -7,10 +7,10 @@ use calibro_core::sketch::{Constraint, CurveKind, SolveStatus};
 use calibro_core::*;
 use egui::{Color32, RichText};
 
-pub const ACCENT: Color32 = Color32::from_rgb(255, 140, 26);
-pub const OK_GREEN: Color32 = Color32::from_rgb(30, 142, 62);
-pub const UNDER_BLUE: Color32 = Color32::from_rgb(42, 111, 219);
-pub const ERR_RED: Color32 = Color32::from_rgb(210, 50, 40);
+pub use crate::style::ACCENT;
+pub const OK_GREEN: Color32 = Color32::from_rgb(103, 214, 159);
+pub const UNDER_BLUE: Color32 = Color32::from_rgb(108, 183, 255);
+pub const ERR_RED: Color32 = Color32::from_rgb(255, 119, 131);
 
 /// Drag value for a length in model millimetres, displayed in document units.
 pub fn length_edit(ui: &mut egui::Ui, mm: &mut f64, units: Units) -> bool {
@@ -199,8 +199,11 @@ impl CalibroApp {
 
     pub fn menu_bar(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         egui::Panel::top("menu").show(ui, |ui| {
+            ui.add_space(3.0);
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.label(RichText::new("Calibro").strong().color(ACCENT));
+                ui.label(RichText::new("C").size(19.0).strong().color(ACCENT));
+                ui.label(RichText::new("Calibro").size(16.0).strong());
+                ui.separator();
                 ui.menu_button("File", |ui| {
                     if ui.button("New project").clicked() {
                         self.request(Pending::New);
@@ -304,21 +307,62 @@ impl CalibroApp {
                     }
                 });
                 ui.separator();
-                if ui
-                    .add_enabled(self.ed.can_undo(), egui::Button::new("Undo"))
-                    .on_hover_text("Undo (Ctrl+Z)")
-                    .clicked()
-                {
-                    self.ed.undo();
-                }
-                if ui
-                    .add_enabled(self.ed.can_redo(), egui::Button::new("Redo"))
-                    .on_hover_text("Redo (Ctrl+Shift+Z)")
-                    .clicked()
-                {
-                    self.ed.redo();
+                if ui.ctx().content_rect().width() >= 620.0 {
+                    if ui
+                        .add_enabled(self.ed.can_undo(), egui::Button::new("Undo"))
+                        .on_hover_text("Undo (Ctrl+Z)")
+                        .clicked()
+                    {
+                        self.ed.undo();
+                    }
+                    if ui
+                        .add_enabled(self.ed.can_redo(), egui::Button::new("Redo"))
+                        .on_hover_text("Redo (Ctrl+Shift+Z)")
+                        .clicked()
+                    {
+                        self.ed.redo();
+                    }
                 }
             });
+        });
+        egui::Panel::top("document_header").show(ui, |ui| {
+            ui.add_space(5.0);
+            ui.horizontal(|ui| {
+                let compact = ui.ctx().content_rect().width() < 620.0;
+                if !compact {
+                    ui.label(
+                        RichText::new(if self.sketch.is_some() {
+                            "SKETCH"
+                        } else {
+                            "MODELING"
+                        })
+                        .size(10.0)
+                        .strong()
+                        .color(ACCENT),
+                    );
+                    ui.separator();
+                }
+                let title_width = (ui.available_width() - 190.0).clamp(40.0, 400.0);
+                ui.add_sized(
+                    [title_width, 30.0],
+                    egui::Label::new(RichText::new(&self.file_name).size(15.0).strong()).truncate(),
+                );
+                if self.ed.is_dirty() {
+                    ui.colored_label(ACCENT, "•")
+                        .on_hover_text("Unsaved changes");
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.menu_button("Export", |ui| self.export_menu(ui, false));
+                    if ui
+                        .button("Save")
+                        .on_hover_text("Save project (Ctrl+S)")
+                        .clicked()
+                    {
+                        self.save(false);
+                    }
+                });
+            });
+            ui.add_space(5.0);
         });
     }
 
@@ -381,15 +425,13 @@ impl CalibroApp {
 
     pub fn left_panel(&mut self, ui: &mut egui::Ui) {
         let narrow = ui.ctx().content_rect().width() < 1200.0;
-        let width = if narrow { 150.0 } else { 190.0 };
+        let width = if narrow { 184.0 } else { 210.0 };
         egui::Panel::left("tools").resizable(false).exact_size(width).show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let in_sketch = self.sketch.is_some();
                 let w = ui.available_width();
-                let tool_btn = |ui: &mut egui::Ui, selected: bool, label: &str, tip: &str| -> bool {
-                    ui.add_sized([w, 26.0], egui::Button::selectable(selected, label)).on_hover_text(tip).clicked()
-                };
-                ui.add_space(4.0);
+                let tool_btn = crate::style::tool_button;
+                crate::style::section(ui, if in_sketch { "SKETCH TOOLS" } else { "MODELING" });
                 if tool_btn(ui, self.tool == Tool::Select, "Select", "Select faces, bodies, regions (Esc)") {
                     self.tool = Tool::Select;
                 }
@@ -398,7 +440,7 @@ impl CalibroApp {
                     self.measure = Measure::default();
                 }
                 ui.separator();
-                ui.label(RichText::new("SKETCH").small().strong());
+                crate::style::section(ui, "SKETCH");
                 if !in_sketch {
                     if tool_btn(ui, self.picking_plane, "New sketch", "Choose a plane or click a flat face (S)") {
                         self.picking_plane = !self.picking_plane;
@@ -419,13 +461,13 @@ impl CalibroApp {
                             }
                         }
                     }
-                    if ui.add_sized([w, 28.0], egui::Button::new(RichText::new("Finish sketch").strong())).clicked() {
+                    if ui.add_sized([w, 28.0], egui::Button::new(RichText::new("Finish sketch").strong().color(crate::style::PANEL)).fill(ACCENT)).clicked() {
                         self.finish_sketch();
                     }
                 }
                 ui.separator();
                 ui.add_enabled_ui(!in_sketch, |ui| {
-                    ui.label(RichText::new("SOLID").small().strong());
+                    crate::style::section(ui, "SOLID");
                     if tool_btn(ui, false, "Extrude", "Extrude selected sketch regions (E)") {
                         self.cmd_extrude();
                     }
@@ -442,7 +484,7 @@ impl CalibroApp {
                         self.cmd_primitive(Primitive::Sphere { center: [0.0, 0.0, 20.0], radius: 20.0 });
                     }
                     ui.separator();
-                    ui.label(RichText::new("MODIFY").small().strong());
+                    crate::style::section(ui, "MODIFY");
                     if tool_btn(ui, false, "Union", "Merge selected bodies into the first one") {
                         self.cmd_boolean(BooleanOp::Union);
                     }
@@ -511,13 +553,44 @@ impl CalibroApp {
             })
             .min_size(220.0)
             .show(ui, |ui| {
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Project").size(17.0).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .small_button("Hide")
+                            .on_hover_text("Hide panel; reopen with Panel in the viewport")
+                            .clicked()
+                        {
+                            self.show_inspector = false;
+                        }
+                    });
+                });
+                ui.add_space(6.0);
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    egui::CollapsingHeader::new(RichText::new("Bodies").strong())
-                        .default_open(true)
-                        .show(ui, |ui| self.bodies_ui(ui));
-                    egui::CollapsingHeader::new(RichText::new("History").strong())
-                        .default_open(true)
-                        .show(ui, |ui| self.history_ui(ui));
+                    ui.spacing_mut().text_edit_width = (ui.available_width() - 70.0).max(80.0);
+                    egui::CollapsingHeader::new(
+                        RichText::new(format!("Bodies  ·  {}", self.ed.model().bodies.len()))
+                            .strong(),
+                    )
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("body_list")
+                            .max_height(150.0)
+                            .show(ui, |ui| self.bodies_ui(ui));
+                    });
+                    egui::CollapsingHeader::new(
+                        RichText::new(format!("History  ·  {}", self.ed.doc().features.len()))
+                            .strong(),
+                    )
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("history_list")
+                            .max_height(210.0)
+                            .show(ui, |ui| self.history_ui(ui));
+                    });
                     ui.separator();
                     self.inspector_ui(ui);
                 });
@@ -689,7 +762,7 @@ impl CalibroApp {
     // ------------------------------------------------------------------ inspector
 
     fn inspector_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Inspector");
+        crate::style::section(ui, "PROPERTIES");
         if self.picking_plane && self.sketch.is_none() {
             ui.label("Choose a sketch plane:");
             ui.horizontal(|ui| {

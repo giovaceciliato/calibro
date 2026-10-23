@@ -39,7 +39,7 @@ then `docs/FEATURE_TRACKER.md` (full scope + status), `docs/TEST_REPORT.md` (evi
 - Useful local tools used so far: `crates/calibro-io/examples/{export_samples,showcase}.rs`.
 
 ## Current state (update every session)
-_Last updated: 2026-10-23 (Modify tools session)._
+_Last updated: 2026-10-23 (dark-blue UI session)._
 - Stage 1 complete (see tracker).
 - On `main`: toolchain pinned to 1.97.0, responsive layout (panels auto-hide below 900/620 px,
   *Tools*/*Panel* toggles), window-title fix, release notes, this file.
@@ -78,16 +78,19 @@ _Last updated: 2026-10-23 (Modify tools session)._
   not a git repo) and `/home/claude/calibro-gh` (git clone of GitHub). In a new session just
   clone the GitHub repo.
 
+- Dark-blue UI refresh prepared on `ui/dark-blue-workspace`: shared navy theme, blue selection, vector tool icons + shortcut hints, document header with Save/Export, project panel counts, empty-workspace start card, coordinated viewport/grid/annotation and browser loading colors. No document-format or kernel changes. Validated with pinned Rust 1.97: fmt, clippy with warnings denied, all 68 tests (1 diagnostic ignored), native build and Xvfb/lavapipe UI checks. Screenshots and limits are in `docs/TEST_REPORT.md` §8. Panels now hide on resize across compact thresholds; perspective grid bounds avoid software-GPU near-plane artifacts.
+
 ## Next steps (in order)
-1. ~~Get the 2026-10-23 changes onto `main`~~ (done, CI green).
-2. Get the owner's feedback on the Fedora/Bazzite packages.
-3. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
+1. Review the dark-blue UI branch `ui/dark-blue-workspace` and its pull request/screenshots; merge only with owner approval. The owner explicitly authorized publishing the source changes and opening a separate PR on 2026-10-23.
+2. ~~Get the 2026-10-23 changes onto `main`~~ (done, CI green).
+3. Get the owner's feedback on the Fedora/Bazzite packages.
+4. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
    check that `release.yml` attaches the three archives.
-4. Re-check the live web app after deploy (narrow-screen layout, Tools/Panel toggles).
-5. Owner feedback on the Modify tools; then extend them: fillets on edges meeting at a corner
+5. Re-check the live web app after deploy (narrow-screen layout, Tools/Panel toggles).
+6. Owner feedback on the Modify tools; then extend them: fillets on edges meeting at a corner
    (needs a corner patch), fillet/chamfer on curved edges, shell of cylinders, multi-section
    loft, click-through UI test of Sweep/Loft creation.
-6. Stage 2 (tracker §9): on-canvas dimension editing, trim/extend + curve intersection,
+7. Stage 2 (tracker §9): on-canvas dimension editing, trim/extend + curve intersection,
    topological naming v1 for sketches on faces (fillet edges are stored as end points, so
    they also break when an earlier edit moves the edge), 3MF export, hide cylinder seam
    edges, capped section view.
@@ -103,3 +106,7 @@ _Last updated: 2026-10-23 (Modify tools session)._
 - 2026-10-23 (later) — Shapr3D-style auto cut when extruding into a body; face-sketch axis orientation fix; rebuilt Fedora packages.
 - 2026-10-23 (later) — Fillet/Chamfer/Shell/Sweep/Loft + Space to sketch on a face (owner request); format v2; pushed to main.
 - 2026-10-23 (later) — Release requested; tag push/release API refused for the AI session (403). release.yml now sets name + body from RELEASE_NOTES.md; owner to publish v0.1.0 from the web UI.
+
+- 2026-10-23 — Dark-blue UI refresh inspired by Shapr3D, implemented on a separate review branch. Shared egui/viewport palette, vector tool icons, shortcuts, project header, panel hierarchy and start card; see test report for validation.
+- 2026-10-23 — GitHub publication blocked by automatic approval review (explicit source-upload authorization requested). Changes, screenshots and test report packaged locally for review; no branch/PR created remotely.
+- 2026-10-23 — Owner explicitly authorized publishing the completed dark-blue UI sources to a separate GitHub branch and opening a pull request. Proceeding with publication; main remains unchanged.

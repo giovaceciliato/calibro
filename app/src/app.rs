@@ -156,6 +156,8 @@ pub struct CalibroApp {
     pub show_inspector: bool,
     /// Set once the first frame has chosen panel visibility from the screen width.
     pub layout_initialised: bool,
+    /// Previous width, used to hide panels when the window crosses compact thresholds.
+    pub layout_width: f32,
     /// Last window title sent, so it is only updated when it changes.
     pub last_title: String,
     pub picking_plane: bool,
@@ -221,6 +223,7 @@ impl CalibroApp {
             show_tools: true,
             show_inspector: true,
             layout_initialised: false,
+            layout_width: 0.0,
             last_title: String::new(),
             picking_plane: false,
             viewport_rect: egui::Rect::NOTHING,
@@ -1416,13 +1419,21 @@ impl eframe::App for CalibroApp {
         }
         // Small screens (phones, narrow browser windows): start with the side
         // panels hidden so the viewport stays usable. They can be toggled any time.
-        if !self.layout_initialised {
-            let w = ctx.content_rect().width();
-            if w > 0.0 {
+        let w = ctx.content_rect().width();
+        if w > 0.0 {
+            if !self.layout_initialised {
                 self.show_inspector = w >= 900.0;
                 self.show_tools = w >= 620.0;
                 self.layout_initialised = true;
+            } else {
+                if self.layout_width >= 900.0 && w < 900.0 {
+                    self.show_inspector = false;
+                }
+                if self.layout_width >= 620.0 && w < 620.0 {
+                    self.show_tools = false;
+                }
             }
+            self.layout_width = w;
         }
 
         self.shortcuts(&ctx, frame);

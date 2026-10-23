@@ -1356,7 +1356,10 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("L R C A P", "Sketch: Line, Rectangle, Circle, Arc, Polygon"),
     ("Enter", "Finish sketch"),
     ("E", "Extrude selected regions"),
-    ("Space", "Sketch on the selected flat face (camera turns to face it)"),
+    (
+        "Space",
+        "Sketch on the selected flat face (camera turns to face it)",
+    ),
     ("M", "Measure"),
     ("Delete", "Delete selection"),
     ("Esc", "Cancel / step back"),

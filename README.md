@@ -35,6 +35,12 @@ runs on the desktop (Windows, macOS, Linux) and in the browser.
 Not yet: corner/curved-edge fillets, shell of curved bodies, 2D drawings, IGES/3MF — see
 [`docs/FEATURE_TRACKER.md`](docs/FEATURE_TRACKER.md) for the full, honest status of every feature.
 
+## Desktop downloads
+
+Download the Windows executable, Fedora RPM, Linux app-menu package, or macOS archive
+from [Releases](https://github.com/giovaceciliato/calibro/releases). Open the release’s
+**Assets** list for the built apps; the source-code archives are for developers.
+
 ## Quick start
 
 ```bash

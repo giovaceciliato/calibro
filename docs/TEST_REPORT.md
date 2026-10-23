@@ -150,3 +150,21 @@ Browser/WebAssembly, real hardware GPUs, Windows/macOS, native file chooser comp
 and full modeling workflows with the new theme were not retested locally in this session.
 The existing CI browser-build job is unchanged. Upstream future-compatibility notices
 for nom/quick-xml remain unchanged.
+
+
+## 9. Update — 23 Oct 2026 (visible desktop release downloads)
+
+- Release workflow validated with actionlint 1.7.12; workflow shell blocks pass `bash -n`.
+- `packaging/prepare-release.py`: functional smoke check with six asset fixtures confirms
+  exact per-tag links, SHA-256 values, preserved launch/limitation sections and documentation
+  links. Missing executable, empty executable and ambiguous RPM inputs are rejected.
+  Windows/macOS fixtures are not runnable builds.
+- Existing native debug binary was copied and stripped for a Linux packaging smoke check;
+  `packaging/build-linux-packages.sh` produced an RPM and a portable archive successfully.
+  RPM contents include `/usr/bin/calibro` and the app-menu desktop entry. Portable archive
+  contains an executable `calibro`, executable `install.sh`, and desktop entry. These local
+  smoke artifacts are not official release downloads and were not installed on the host.
+- No new Windows/macOS builds, tag creation, GitHub Release publication or asset upload was
+  performed. The final release job awaits all three builds and validates the download set.
+- Merge the workflow changes before creating the next tag on current main. A regular-branch
+  manual run keeps packages as workflow artifacts without publishing a release.

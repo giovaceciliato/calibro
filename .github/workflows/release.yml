@@ -1,14 +1,23 @@
-# Builds downloadable desktop apps for Windows, macOS and Linux when you push a
-# version tag such as "v0.1.0" (see docs/BEGINNER_GUIDE.md, "Making a release").
+# Builds desktop downloads for version tags and releases published through GitHub.
 name: Release desktop apps
 
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+# Tag pushes and release publication can arrive close together. Serialize uploads.
+concurrency:
+  group: desktop-release-${{ github.event.release.tag_name || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CALIBRO_RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
 
 jobs:
   build:
@@ -16,8 +25,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Pinned (not ubuntu-latest): the glibc version here sets the minimum Linux
-          # the binary runs on. Ubuntu 24.04 = glibc 2.39 = Fedora 40+, Ubuntu 24.04+.
+          # Ubuntu 24.04 = glibc 2.39 minimum (Fedora 40+, Ubuntu 24.04+).
           - os: ubuntu-24.04
             name: calibro-linux-x86_64
             bin: calibro
@@ -30,44 +38,74 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.0  # keep in sync with rust-toolchain.toml
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --release -p calibro
-      - name: Package
-        shell: bash
-        run: |
-          mkdir -p "${{ matrix.name }}"
-          cp "target/release/${{ matrix.bin }}" "${{ matrix.name }}/"
-          cp README.md LICENSE "${{ matrix.name }}/"
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            7z a "${{ matrix.name }}.zip" "${{ matrix.name }}"
-          else
-            tar -czf "${{ matrix.name }}.tar.gz" "${{ matrix.name }}"
-          fi
-      - name: Fedora / Linux packages (RPM + portable tarball)
+        run: cargo build --release --locked -p calibro
+      - name: Fedora / Linux packages (RPM + app-menu installer)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update && sudo apt-get install -y rpm
           strip target/release/calibro
           packaging/build-linux-packages.sh target/release/calibro
-          cp dist-linux/*.rpm dist-linux/*.tar.gz .
-      - name: Upload to the release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v3
-        with:
-          name: Calibro ${{ github.ref_name }}
-          body_path: RELEASE_NOTES.md
-          files: |
-            ${{ matrix.name }}.zip
-            ${{ matrix.name }}.tar.gz
-            calibro-*.rpm
-            calibro-*-linux-x86_64.tar.gz
-          fail_on_unmatched_files: false
-      - name: Keep as workflow artifact
+      - name: Package desktop downloads
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+          BINARY_NAME: ${{ matrix.bin }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist "$PACKAGE_NAME"
+          cp "target/release/$BINARY_NAME" "$PACKAGE_NAME/"
+          cp README.md LICENSE "$PACKAGE_NAME/"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp "target/release/$BINARY_NAME" "dist/$PACKAGE_NAME.exe"
+            7z a "dist/$PACKAGE_NAME.zip" "$PACKAGE_NAME"
+          else
+            tar -czf "dist/$PACKAGE_NAME.tar.gz" "$PACKAGE_NAME"
+          fi
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cp dist-linux/*.rpm dist-linux/*.tar.gz dist/
+          fi
+      - name: Keep downloadable packages as workflow artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.name }}
+          name: release-assets-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Attach all downloads to the release
+    needs: build
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-assets-*
+          path: dist
+          merge-multiple: true
+      - name: Check downloads, add checksums and build linked release notes
+        run: |
+          python3 packaging/prepare-release.py \
+            --tag "$CALIBRO_RELEASE_TAG" \
+            --repository "$GITHUB_REPOSITORY" \
+            --assets-dir dist \
+            --output release-body.md
+      - name: Upload all desktop downloads
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.CALIBRO_RELEASE_TAG }}
+          name: Calibro ${{ env.CALIBRO_RELEASE_TAG }}
+          body_path: release-body.md
+          files: dist/*
+          fail_on_unmatched_files: true

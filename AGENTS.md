@@ -39,69 +39,40 @@ then `docs/FEATURE_TRACKER.md` (full scope + status), `docs/TEST_REPORT.md` (evi
 - Useful local tools used so far: `crates/calibro-io/examples/{export_samples,showcase}.rs`.
 
 ## Current state (update every session)
-_Last updated: 2026-10-23 (fillet/chamfer mouse handles)._
-- Stage 1 complete (see tracker).
-- On `main`: toolchain pinned to 1.97.0, responsive layout (panels auto-hide below 900/620 px,
-  *Tools*/*Panel* toggles), window-title fix, release notes, this file.
-- GitHub Actions on d11b79d: **CI green** (fmt, clippy, 58 tests incl. GPU tests on lavapipe,
-  wasm build) and **Pages green**. Live web app re-checked in a real browser (Claude desktop
-  browser pane, WebGPU on Intel): loads, narrow layout correct, no console spam.
-- Fedora packaging added (`packaging/`): RPM spec, desktop entry, MIME type for `.calibro`,
-  AppStream metainfo, icons, user-level `install.sh`, and `packaging/build-linux-packages.sh`
-  (builds `dist-linux/*.rpm` + portable `*.tar.gz` from a release binary). `release.yml` now
-  builds them too and pins the Linux runner to ubuntu-24.04 (glibc 2.39 → Fedora 40+).
-  Packages built locally and given to the owner for testing on Fedora/Bazzite; portable
-  install/uninstall + launch verified on Ubuntu/Xvfb; RPM metadata checked with `rpm -qp`,
-  `desktop-file-validate`, `appstreamcli validate`. RPM **not yet installed on a real Fedora**.
-- Packaging commit pushed to `main` (release.yml only runs on tags, so nothing is published until a release is created).
-- 2026-10-23: owner reported that pushing an extrusion into the body didn't remove material.
-  Fixed: `Document::auto_extrude_mode` switches Join↔Cut when the distance sign flips for a
-  sketch made on that body's face (handle turns red with a "cut" label). Also face-sketch
-  axes now follow world X (`Plane::from_origin_normal`) so H/V match the screen. 60 tests.
-- 2026-10-23 (latest): **Modify tools** added — Fillet, Chamfer (straight edges between flat
-  faces; several edges at once, not edges sharing a corner), Shell (convex flat-faced bodies,
-  open faces or closed), Sweep (profile along an open line/tangent-arc chain sketch), Loft
-  (two closed profiles). Kernel code in `crates/calibro-kernel/src/ops.rs` (module docs explain
-  the tricks: boolean nudge, tolerance ladder, sliver faces). New `FeatureKind` variants;
-  `.calibro` **FORMAT_VERSION 2** (v1 files load unchanged). UI: Shift+click selects several
-  edges (`Selection::edges`), inspector panels for each feature, toolbar buttons enabled.
-  **Space** with a flat face selected = `start_sketch_on_face` (camera faces it, ortho,
-  framed). Demo: `examples/modify-tools.calibro` (`cargo run -p calibro-io --example modify_tools`). 68 tests.
-- Owner gave the OK for release v0.1.0 (2026-10-23). The AI session could NOT create it:
-  pushing tags and the releases API are blocked for Claude sessions (HTTP 403). The owner
-  creates it on github.com (Releases → Draft a new release → new tag `v0.1.0` on `main` →
-  Publish). The tag push starts `release.yml`, which now uses `RELEASE_NOTES.md` as the text
-  and attaches the Windows zip, macOS tar.gz, Linux tar.gz, Fedora RPM and portable package.
-- Not yet done: check the published release assets; GitHub Release v0.1.0 (waiting for the owner's OK). Windows/macOS binaries
-  have been built by CI but never launched on real machines.
-- Local working copies used by the 2026-10-22/23 sessions: `/home/claude/calibro` (original,
-  not a git repo) and `/home/claude/calibro-gh` (git clone of GitHub). In a new session just
-  clone the GitHub repo.
+_Last updated: 2026-10-23 18:40 (feature-tracker push, branch `feat/tracker-stage2`)._
 
-- Dark-blue UI refresh merged into `main` via PR #1 (merge commit `d8cff4b4f771a487d0502a06886902d76b449c70`): shared navy theme, blue selection, vector tool icons + shortcut hints, document header with Save/Export, project panel counts, empty-workspace start card, coordinated viewport/grid/annotation and browser loading colors. No document-format or kernel changes. Validated with pinned Rust 1.97: fmt, clippy with warnings denied, all 68 tests (1 diagnostic ignored), native build and Xvfb/lavapipe UI checks. Screenshots and limits are in `docs/TEST_REPORT.md` §8. Panels now hide on resize across compact thresholds; perspective grid bounds avoid software-GPU near-plane artifacts.
-
-- Release-download improvements prepared on `release/visible-downloads`: direct Windows `.exe` plus ZIP; one final upload job waits for Windows/macOS/Linux builds; release body contains exact tag-specific download links and SHA-256 checksums; missing, empty or ambiguous platform packages fail validation. Also handles `release: published`. Linux RPM/portable packaging smoke-checked with the existing native binary; workflow validated with actionlint 1.7.12. No release/tag was created.
-
-- PR #2 merged into main (`857cf0c`). Release `0.1.1` exists as a prerelease, but has no assets: run `39946759282` built all three platforms successfully and failed only because `prepare-release.py` required a `v` prefix. Fix on `fix/release-tag-recovery` accepts the real tag, adds regression tests to CI and a manual recovery workflow that verifies tag/build provenance before attaching the original artifacts. No tag/release changes or recovery upload performed yet.
-
-- PR #3 was merged into main (`5436754`). New branch `fix/sketch-circles`: reproduced missing circle drag support; preserved two-click circles, added centre-drag-release and exact Radius → Create circle in sketch Properties, and reset unfinished points on toolbar/keyboard tool changes. Four app regression tests plus Xvfb checks; full suite now 72 passed (1 diagnostic ignored). See test report §11 and `docs/images/sketch-circles.png`. No serialization changes.
-
-- Circle fix PR #4 is merged (`d92df1b`). Branch `feat/edge-drag-handles` adds Fillet/Chamfer on-model bidirectional handles, live validated preview, Shift fine adjustment, Escape cancellation, single-step undo/redo and preserved numeric entry. Editor gains checked/coalesced candidates and cancellation that preserves dirty/redo/history state. Thirteen regression tests added; full suite 85 passed (1 diagnostic ignored), fmt/Clippy/native build passed; native example checked for Fillet 3→1 mm + Undo, Chamfer 1→3 mm + Esc. Evidence and screenshots: test report §12. No serialized document changes.
+**Read this first. Older details are in the session log and `docs/TEST_REPORT.md`.**
+- `main` = PR #5 merged (fillet/chamfer drag handles). Releases: `0.1.1` (prerelease) has
+  all packages but predates PR #3–#5; `0.1.0` and `beta` releases are empty. `Cargo.toml`
+  version is still 0.1.0 (the RPM name follows it) — bump before the next release.
+  AI sessions cannot push tags or use the releases API (HTTP 403): the owner publishes
+  releases on github.com and `release.yml` builds/attaches every package.
+- **Branch `feat/tracker-stage2` (PR opened 2026-10-23, waiting for the owner)** — finishes
+  many tracker items, 102 tests pass locally (fmt + clippy clean):
+  - 3MF export (`calibro_io::export_3mf`, Export menu).
+  - Smooth edges (cylinder seams) hidden (`kernel::is_smooth_edge`).
+  - Section view fills the cut (`kernel::section_cap`, cached per body in `app.cap_cache`).
+  - Sketches on faces follow their face (`FaceAttach`, `recompute::resolve_face_attach`,
+    `Model::sketch_planes` / `Model::sketch_plane`) → `.calibro` **FORMAT_VERSION 3**.
+  - Sketch: crossing curves split into regions (`calibro-sketch/src/intersect.rs`), Trim
+    tool (T), centre rectangle, 3-point arc, midpoint/crossing snaps, click a dimension
+    label to edit it on the canvas (`dimension_editor` in `viewport.rs`).
+  - STEP import as editable solids (`calibro-io/src/step_solid.rs`, fixtures written by
+    Open CASCADE in `crates/calibro-io/tests/data`); app falls back to the mesh import when
+    a shell doesn't convert. `step_debug_report` (hidden) prints conversion diagnostics.
+  - Kernel: sphere meshing bug fixed (spheres containing the origin), `make_torus`,
+    `validate_imported`. App: edges behind a face are no longer pickable through it.
+- Never launched on real hardware: Windows/macOS binaries, RPM on real Fedora.
 
 ## Next steps (in order)
-1. Review/merge the fillet/chamfer mouse-handle PR and publish a new desktop build if desired. Circle PR #4 is merged. Release recovery fix #3 remains available (tag `0.1.1`, source run `39946759282`); release recovery status was not checked during this modeling-UI session.
-2. ~~Get the 2026-10-23 changes onto `main`~~ (done, CI green).
-3. Get the owner's feedback on the Fedora/Bazzite packages.
-4. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
-   check that `release.yml` attaches the three archives.
-5. Re-check the live web app after deploy (narrow-screen layout, Tools/Panel toggles).
-6. Owner feedback on the Modify tools; then extend them: fillets on edges meeting at a corner
-   (needs a corner patch), fillet/chamfer on curved edges, shell of cylinders, multi-section
-   loft, click-through UI test of Sweep/Loft creation.
-7. Stage 2 (tracker §9): on-canvas dimension editing, trim/extend + curve intersection,
-   topological naming v1 for sketches on faces (fillet edges are stored as end points, so
-   they also break when an earlier edit moves the edge), 3MF export, hide cylinder seam
-   edges, capped section view.
+1. Owner: review/merge the `feat/tracker-stage2` PR (check CI green first: wasm build uses
+   the new `earcutr` dependency — not compiled for wasm locally).
+2. Re-check edge picking on Xvfb after the "edges behind faces" fix (not re-verified).
+3. Bump version (0.1.2), update `RELEASE_NOTES.md`, owner publishes the release.
+4. STEP import: faces with a seam *and* holes, partial spheres/tori, IGES study.
+5. Sketch: extend, offset, tangent arc, splines; constraints for snapped midpoints/crossings.
+6. Topological naming for fillet/chamfer edges; corner fillets; shell of curved bodies.
+7. Supersampled image export; capped sections with hatch; real-hardware tests.
 
 ## Session log
 - 2026-10-22 — Stage 1 built: research, architecture, all crates, app, native format, exports,
@@ -128,3 +99,4 @@ _Last updated: 2026-10-23 (fillet/chamfer mouse handles)._
 - 2026-10-23 — Owner reported sketch circles could not be drawn. Reproduced drag failure (two clicks already worked), added drag creation and exact-radius Properties action, fixed shortcut gesture state, and verified four new app tests plus native drawing/extrusion. Published for review on `fix/sketch-circles`; 72 workspace tests pass.
 
 - 2026-10-23 — Owner requested mouse-slider behavior for fillet/chamfer like Shapr3D. Added on-model handles, validated live preview, fine control, Escape cancellation and one-step undo, with Editor transaction support and thirteen regression tests. Native drag/Undo/Esc checks recorded; prepared on a separate review branch.
+- 2026-10-23 evening — Owner asked to finish tracker items: 3MF, seam hiding, section caps, sketch-on-face follows face (format v3), sketch intersections + Trim + centre rectangle + 3-point arc + snaps + on-canvas dimensions, STEP → editable solids, sphere bug fix. Branch `feat/tracker-stage2` + PR; owner said "salva e riprendiamo dopo".

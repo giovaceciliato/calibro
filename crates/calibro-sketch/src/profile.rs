@@ -9,8 +9,9 @@
 //! two regions: the rectangle with a hole, and the disc. A line splitting a
 //! rectangle gives two regions, as in Shapr3D.
 //!
-//! Limitation: curves that cross each other without sharing an endpoint are
-//! not split at the crossing (no curve–curve intersection yet).
+//! Curves that cross or touch each other without sharing an end point are split at
+//! the crossing first (see [`crate::intersect`]), so two overlapping circles give three
+//! regions and a line drawn across a rectangle splits it, like in Shapr3D.
 
 use crate::model::{Constraint, CurveKind, Sketch};
 use serde::{Deserialize, Serialize};
@@ -269,6 +270,122 @@ struct GEdge {
     seg: Segment,
 }
 
+/// Splits edges (and full circles) where they cross or touch each other. New graph
+/// vertices get indices from `first_new` upwards; crossings at the same place share one
+/// vertex.
+fn split_at_intersections(edges: &mut Vec<GEdge>, loops: &mut Vec<Loop>, first_new: usize) {
+    use crate::intersect::{point_at, split_params, sub_segment};
+    let circles: Vec<Segment> = loops
+        .iter()
+        .filter_map(|l| match l.segments.as_slice() {
+            [s @ Segment::Circle { .. }] => Some(*s),
+            _ => None,
+        })
+        .collect();
+    let all: Vec<Segment> = edges
+        .iter()
+        .map(|e| e.seg)
+        .chain(circles.iter().copied())
+        .collect();
+    if all.len() < 2 {
+        return;
+    }
+    // known vertex positions (end points of edges) for snapping crossings
+    let mut verts: Vec<(usize, [f64; 2])> = Vec::new();
+    for e in edges.iter() {
+        let (f, t) = match e.seg {
+            Segment::Line { from, to } | Segment::Arc { from, to, .. } => (from, to),
+            Segment::Circle { .. } => continue,
+        };
+        verts.push((e.u, f));
+        verts.push((e.v, t));
+    }
+    let mut next_id = first_new;
+    let mut vertex_at = |p: [f64; 2], verts: &mut Vec<(usize, [f64; 2])>| -> usize {
+        if let Some(v) = verts
+            .iter()
+            .find(|(_, q)| (q[0] - p[0]).abs() < 1e-6 && (q[1] - p[1]).abs() < 1e-6)
+        {
+            return v.0;
+        }
+        let id = next_id;
+        next_id += 1;
+        verts.push((id, p));
+        id
+    };
+    let mut new_edges = Vec::new();
+    for (i, e) in edges.iter().enumerate() {
+        let others: Vec<Segment> = all
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| *j != i)
+            .map(|(_, s)| *s)
+            .collect();
+        let ts = split_params(&e.seg, &others);
+        if ts.is_empty() {
+            new_edges.push(*e);
+            continue;
+        }
+        let mut cuts = vec![0.0];
+        cuts.extend(ts);
+        cuts.push(1.0);
+        let mut prev = e.u;
+        for k in 0..cuts.len() - 1 {
+            let next = if k + 2 == cuts.len() {
+                e.v
+            } else {
+                vertex_at(point_at(&e.seg, cuts[k + 1]), &mut verts)
+            };
+            new_edges.push(GEdge {
+                u: prev,
+                v: next,
+                seg: sub_segment(&e.seg, cuts[k], cuts[k + 1]),
+            });
+            prev = next;
+        }
+    }
+    let n_edges = edges.len();
+    let mut kept_loops = Vec::new();
+    for l in loops.drain(..) {
+        let circle = match l.segments.as_slice() {
+            [s @ Segment::Circle { .. }] => *s,
+            _ => {
+                kept_loops.push(l);
+                continue;
+            }
+        };
+        let idx = circles
+            .iter()
+            .position(|c| *c == circle)
+            .map(|k| n_edges + k);
+        let others: Vec<Segment> = all
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| Some(*j) != idx)
+            .map(|(_, s)| *s)
+            .collect();
+        let ts = split_params(&circle, &others);
+        if ts.len() < 2 {
+            kept_loops.push(l); // untouched or only tangent at one point
+            continue;
+        }
+        let ids: Vec<usize> = ts
+            .iter()
+            .map(|t| vertex_at(point_at(&circle, *t), &mut verts))
+            .collect();
+        for k in 0..ts.len() {
+            let (t0, t1) = (ts[k], ts[(k + 1) % ts.len()]);
+            new_edges.push(GEdge {
+                u: ids[k],
+                v: ids[(k + 1) % ts.len()],
+                seg: sub_segment(&circle, t0, t1),
+            });
+        }
+    }
+    *loops = kept_loops;
+    *edges = new_edges;
+}
+
 /// Finds all closed regions in the sketch.
 pub fn find_profiles(sketch: &Sketch) -> Vec<Profile> {
     const MERGE_TOL: f64 = 1e-6;
@@ -349,6 +466,8 @@ pub fn find_profiles(sketch: &Sketch) -> Vec<Profile> {
             }
         }
     }
+
+    split_at_intersections(&mut edges, &mut loops, ids.len());
 
     // Prune dangling edges repeatedly.
     loop {
@@ -485,10 +604,15 @@ pub fn find_profiles(sketch: &Sketch) -> Vec<Profile> {
     profiles
 }
 
-/// A point on the loop boundary, nudged slightly inward isn't needed: we use the
-/// midpoint of the first segment for containment tests between disjoint loops.
+/// A point strictly inside the loop, for containment tests between loops. (A point on
+/// the boundary is ambiguous when two regions share an edge, e.g. the lens and the
+/// crescents of two overlapping circles.)
 fn sample_on_loop(l: &Loop) -> [f64; 2] {
-    l.segments[0].midpoint()
+    Profile {
+        outer: l.clone(),
+        holes: vec![],
+    }
+    .interior_point()
 }
 
 fn start_tangent(s: &Segment) -> [f64; 2] {

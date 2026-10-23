@@ -7,8 +7,12 @@
 //! | Mesh | STL binary/ASCII | export + import | triangles only, millimetres, Z-up |
 //! | Mesh | OBJ + MTL | export + import | triangles + normals + colours, Y-up for Blender |
 //! | Scene | glTF binary (`.glb`) | export | PBR materials, one node per body, metres, Y-up |
+//! | 3D printing | 3MF (`.3mf`) | export | one object per body, shared vertices, colours, millimetres |
 //!
 //! None of these preserve Calibro's feature history; that is what `.calibro` is for.
+
+mod step_solid;
+pub use step_solid::{debug_report as step_debug_report, import_step_solids, StepSolids};
 
 use calibro_core::{BodyId, Document, EvaluatedBody, Material, MeshResource, Model};
 use calibro_kernel::{BodyMesh, Solid};
@@ -372,6 +376,122 @@ pub fn import_obj(text: &str) -> Result<MeshResource, IoError> {
     Ok(weld_triangles(&tris))
 }
 
+// --------------------------------------------------------------------- 3MF
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Exports a 3MF package (3D Manufacturing Format core spec 1.2): a ZIP with one
+/// `<object>` per body (indexed, watertight mesh in millimetres) and the body colours as
+/// base materials. Read by PrusaSlicer, Bambu Studio, Cura, Windows 3D Viewer, Blender.
+pub fn export_3mf(bodies: &[ExportBody]) -> Result<Vec<u8>, IoError> {
+    use std::collections::HashMap;
+    use std::io::Write;
+    if bodies.is_empty() {
+        return Err(IoError::Empty);
+    }
+    let mut model = String::new();
+    model.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+ <metadata name="Application">Calibro</metadata>
+ <resources>
+  <basematerials id="1">
+"#);
+    for b in bodies {
+        let c = b.material.color;
+        let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let _ = writeln!(
+            model,
+            r##"   <base name="{}" displaycolor="#{:02X}{:02X}{:02X}{:02X}"/>"##,
+            xml_escape(&b.material.name),
+            to8(c[0]),
+            to8(c[1]),
+            to8(c[2]),
+            to8(c[3])
+        );
+    }
+    model.push_str("  </basematerials>\n");
+    for (i, b) in bodies.iter().enumerate() {
+        let m = &*b.mesh;
+        // share vertices (meshes are welded on collection, so equal positions are bit-equal)
+        let mut index: HashMap<[u32; 3], u32> = HashMap::new();
+        let mut verts: Vec<[f32; 3]> = Vec::new();
+        let mut remap = Vec::with_capacity(m.positions.len());
+        for p in &m.positions {
+            let key = p.map(|x| (x + 0.0).to_bits());
+            let id = *index.entry(key).or_insert_with(|| {
+                verts.push(*p);
+                verts.len() as u32 - 1
+            });
+            remap.push(id);
+        }
+        let _ = writeln!(
+            model,
+            r#"  <object id="{}" type="model" name="{}" pid="1" pindex="{}">
+   <mesh>
+    <vertices>"#,
+            i + 2,
+            xml_escape(&b.name),
+            i
+        );
+        for v in &verts {
+            let _ = writeln!(
+                model,
+                r#"     <vertex x="{}" y="{}" z="{}"/>"#,
+                v[0], v[1], v[2]
+            );
+        }
+        model.push_str("    </vertices>\n    <triangles>\n");
+        for t in m.indices.chunks_exact(3) {
+            let [a, b2, c] = [0, 1, 2].map(|k| remap[t[k] as usize]);
+            if a == b2 || b2 == c || a == c {
+                continue;
+            }
+            let _ = writeln!(model, r#"     <triangle v1="{a}" v2="{b2}" v3="{c}"/>"#);
+        }
+        model.push_str("    </triangles>\n   </mesh>\n  </object>\n");
+    }
+    model.push_str(" </resources>\n <build>\n");
+    for i in 0..bodies.len() {
+        let _ = writeln!(model, r#"  <item objectid="{}"/>"#, i + 2);
+    }
+    model.push_str(" </build>\n</model>\n");
+
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+ <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+ <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
+</Types>
+"#;
+    let rels = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+</Relationships>
+"#;
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut z = zip::ZipWriter::new(&mut buf);
+        let o = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        let err = |e: zip::result::ZipError| IoError::Parse(e.to_string());
+        for (name, data) in [
+            ("[Content_Types].xml", content_types.as_bytes()),
+            ("_rels/.rels", rels.as_bytes()),
+            ("3D/3dmodel.model", model.as_bytes()),
+        ] {
+            z.start_file(name, o).map_err(err)?;
+            z.write_all(data)
+                .map_err(|e| IoError::Parse(e.to_string()))?;
+        }
+        z.finish().map_err(err)?;
+    }
+    Ok(buf.into_inner())
+}
+
 // --------------------------------------------------------------------- glTF (GLB)
 
 /// Exports a self-contained binary glTF 2.0 scene. Units are metres and Y-up
@@ -649,6 +769,59 @@ mod tests {
     }
 
     #[test]
+    fn three_mf_package() {
+        use std::io::Read;
+        let (doc, ed) = model();
+        let bodies = collect_bodies(&doc, ed.model(), None);
+        let expected: f64 = bodies.iter().map(|b| b.mesh.volume()).sum();
+        let data = export_3mf(&bodies).unwrap();
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(data)).unwrap();
+        for name in ["[Content_Types].xml", "_rels/.rels"] {
+            assert!(z.by_name(name).is_ok(), "{name}");
+        }
+        let mut xml = String::new();
+        z.by_name("3D/3dmodel.model")
+            .unwrap()
+            .read_to_string(&mut xml)
+            .unwrap();
+        assert!(xml.contains(r#"unit="millimeter""#));
+        assert_eq!(xml.matches("<object ").count(), 2);
+        assert_eq!(xml.matches("<item ").count(), 2);
+        // parse back vertices/triangles and check volume + closedness of every object
+        let attr = |line: &str, k: &str| -> f64 {
+            let s = line.split(&format!(r#"{k}=""#)).nth(1).unwrap();
+            s[..s.find('"').unwrap()].parse().unwrap()
+        };
+        let mut vol = 0.0;
+        for obj in xml.split("<object ").skip(1) {
+            let v: Vec<[f64; 3]> = obj
+                .lines()
+                .filter(|l| l.contains("<vertex "))
+                .map(|l| [attr(l, "x"), attr(l, "y"), attr(l, "z")])
+                .collect();
+            let mut edges = std::collections::HashMap::new();
+            for l in obj.lines().filter(|l| l.contains("<triangle ")) {
+                let t = ["v1", "v2", "v3"].map(|k| attr(l, k) as usize);
+                let [a, b, c] = t.map(|i| v[i]);
+                vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0])
+                    + a[2] * (b[0] * c[1] - b[1] * c[0]))
+                    / 6.0;
+                for k in 0..3 {
+                    *edges.entry((t[k], t[(k + 1) % 3])).or_insert(0) += 1;
+                }
+            }
+            // watertight + consistently oriented: every directed edge has its reverse
+            for &(a, b) in edges.keys() {
+                assert!(edges.contains_key(&(b, a)), "open edge {a}-{b}");
+            }
+        }
+        assert!(
+            (vol - expected).abs() / expected < 1e-5,
+            "{vol} vs {expected}"
+        );
+    }
+
+    #[test]
     fn step_export_then_import() {
         let (doc, ed) = model();
         let bodies = collect_bodies(&doc, ed.model(), None);
@@ -662,6 +835,23 @@ mod tests {
             (v - expected).abs() / expected < 1e-2,
             "re-imported volume {v} vs {expected}"
         );
+    }
+
+    #[test]
+    fn own_step_reimports_as_solids() {
+        let (doc, ed) = model();
+        let bodies = collect_bodies(&doc, ed.model(), None);
+        let expected: f64 = bodies.iter().map(|b| b.mesh.volume()).sum();
+        let step = export_step(&bodies, "test.step").unwrap();
+        let r = import_step_solids(&step).unwrap();
+        assert!(r.skipped.is_empty(), "{:?}", r.skipped);
+        assert_eq!(r.solids.len(), bodies.len());
+        let v: f64 = r
+            .solids
+            .iter()
+            .map(|s| calibro_kernel::tessellate(s, 0.01).volume())
+            .sum();
+        assert!((v - expected).abs() / expected < 5e-3, "{v} vs {expected}");
     }
 
     #[test]

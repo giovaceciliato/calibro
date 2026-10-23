@@ -36,6 +36,7 @@ fn main() {
             plane: Plane::XY,
             sketch: s,
             on_body: None,
+            attach: None,
         },
     );
     let plate = doc.add_feature(
@@ -68,6 +69,7 @@ fn main() {
             plane: top,
             sketch: s2,
             on_body: Some(pb),
+            attach: None,
         },
     );
     doc.add_feature(
@@ -116,6 +118,7 @@ fn main() {
             plane: front,
             sketch: s3,
             on_body: None,
+            attach: None,
         },
     );
     let knob = doc.add_feature(

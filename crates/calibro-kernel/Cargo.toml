@@ -14,5 +14,6 @@ truck-shapeops.workspace = true
 truck-meshalgo.workspace = true
 truck-topology.workspace = true
 calibro-sketch.workspace = true
+earcutr = "0.5"
 
 [dev-dependencies]

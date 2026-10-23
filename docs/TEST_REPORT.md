@@ -238,3 +238,22 @@ Keyboard tool changes also retained unfinished points from the prior sketch tool
 - Pinned Rust 1.97: formatting, Clippy with warnings denied, native build and full suite pass: **85 passed**, 0 failed, 1 diagnostic ignored.
 - Browser/touch hardware, real GPU drivers and performance on large models not retested.
   Existing kernel restrictions on supported edge geometry remain unchanged.
+
+## 13. Update — 23 Oct 2026 evening (feature-tracker push, branch `feat/tracker-stage2`)
+
+| Item | Result |
+|---|---|
+| Full suite (Rust stable locally, lavapipe) | ✅ fmt, clippy `-D warnings`, **102 passed**, 1 ignored |
+| 3MF export | ✅ unit test (zip parts, closed + consistently oriented triangles, volume); `sample.3mf` opened with **trimesh 5.1.1: watertight, volume 20 337.38 mm³** (same as STL) |
+| Smooth/seam edges hidden | ✅ kernel test: cylinder has no vertical seam line, box keeps 12 edges |
+| Section view caps | ✅ kernel test (rectangle minus hole area, two loops; cut through the hole = two rectangles); Xvfb `docs/images/section-caps.png` (bracket and knob cut along Y show solid caps with the holes) |
+| Sketch on face follows the face (format v3) | ✅ core test: box made taller → sketch plane and boss move up, volume exact; face removed → warning, sketch stays. Project tests: v3 round trip with `attach`, v1 still opens |
+| Crossing curves split into regions | ✅ two overlapping circles → 3 regions with exact lens/crescent areas; line across a rectangle → 2 regions; T junction; lens extruded (core test). Found and fixed: loops sharing an edge were mis-nested (boundary sample point) |
+| Trim tool | ✅ unit tests (circle → arc, line pieces, middle piece → 2 lines, lone curve deleted); app test (one Undo restores); Xvfb `docs/images/sketch-trim.png` |
+| On-canvas dimension editing | ✅ app test: click the R label, type 25, Enter → radius 25 |
+| Centre rectangle, 3-point arc, midpoint/crossing snaps | ✅ app tests |
+| STEP import as editable solids | ✅ 4 files written by **Open CASCADE (OCP 8.0.1)**: plate with fillets + hole (+0.05 % volume vs OCC), sphere, torus, cone (each within 1 %); a box cut from the imported plate gives the expected volume; our own STEP re-imports as solids. Xvfb: `plate_fillets.step` opened from the command line as 1 editable solid. Found and fixed on the way: NURBS arc weight bug, OCC periodic pcurves evaluating to NaN (curves now trimmed to their vertices), seam faces, wrap of periodic surfaces |
+| Kernel fix found by the STEP tests | ✅ spheres containing the origin meshed ~30 % too big (also affected the Sphere primitive) → fixed, test added |
+| Edge picking | fixed: edges on the far side of a body were picked through the front face (seen on Xvfb); not yet re-checked on Xvfb after the fix |
+| Not done | IGES; tangent arc; extend/offset; STEP faces with seams *and* holes fall back to mesh |
+

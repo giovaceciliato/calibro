@@ -384,6 +384,11 @@ impl CalibroApp {
                 "Meshes + colours for Blender, Maya, Cinema 4D, 3ds Max",
             ),
             (
+                "3MF (.3mf) — 3D printing",
+                "3mf",
+                "Mesh + colours in mm for PrusaSlicer, Bambu Studio, Cura",
+            ),
+            (
                 "STL binary (.stl)",
                 "stl",
                 "Watertight triangle mesh for 3D printing (mm)",
@@ -448,9 +453,12 @@ impl CalibroApp {
                     for (t, label, tip) in [
                         (Tool::Line, "Line", "L"),
                         (Tool::Rectangle, "Rectangle", "R"),
+                        (Tool::CenterRectangle, "Centre rectangle", "Rectangle from its centre and a corner"),
                         (Tool::Circle, "Circle", "Click centre then circumference, or drag from the centre (C)"),
                         (Tool::Arc, "Arc", "A"),
+                        (Tool::Arc3, "3-point arc", "Start, end, and a point on the arc"),
                         (Tool::Polygon, "Polygon", "P"),
+                        (Tool::Trim, "Trim", "Click the piece of a curve to cut away; curves are split where they cross (T)"),
                     ] {
                         if tool_btn(ui, self.tool == t, label, tip) {
                             self.set_tool(t);

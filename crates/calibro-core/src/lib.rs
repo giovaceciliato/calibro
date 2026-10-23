@@ -45,6 +45,7 @@ mod tests {
                 plane: Plane::XY,
                 sketch: s,
                 on_body: None,
+                attach: None,
             },
         );
         let ex = doc.add_feature(
@@ -222,6 +223,7 @@ mod tests {
                 plane: top,
                 sketch: s,
                 on_body: Some(body),
+                attach: None,
             },
         );
         let boss = doc.add_feature(
@@ -243,6 +245,7 @@ mod tests {
                     plane: top,
                     sketch: s,
                     on_body: Some(body),
+                    attach: None,
                 },
             )
         };
@@ -293,6 +296,7 @@ mod tests {
                 plane: top,
                 sketch: s,
                 on_body: Some(body),
+                attach: None,
             },
         );
         let e2 = doc.add_feature(
@@ -451,6 +455,7 @@ mod tests {
                 plane: Plane::XZ,
                 sketch: prof,
                 on_body: None,
+                attach: None,
             },
         );
         // path on the XY plane: line along +Y then a quarter arc turning to +X
@@ -467,6 +472,7 @@ mod tests {
                 plane: Plane::XY,
                 sketch: path,
                 on_body: None,
+                attach: None,
             },
         );
         let sw = doc.add_feature(
@@ -487,6 +493,7 @@ mod tests {
                 plane: Plane::XY,
                 sketch: s1,
                 on_body: None,
+                attach: None,
             },
         );
         let mut s2 = Sketch::new();
@@ -500,6 +507,7 @@ mod tests {
                 },
                 sketch: s2,
                 on_body: None,
+                attach: None,
             },
         );
         let lo = doc.add_feature(
@@ -544,6 +552,132 @@ mod tests {
         );
         let expl = 10.0 / 3.0 * (100.0 + 36.0 + 60.0);
         assert!((vl - expl).abs() / expl < 1e-3, "loft {vl} vs {expl}");
+    }
+
+    #[test]
+    fn sketch_on_face_follows_the_face() {
+        use calibro_sketch::Sketch;
+        let mut doc = Document::new();
+        let b = doc.add_feature(
+            "",
+            FeatureKind::Primitive {
+                primitive: Primitive::Box {
+                    min: [0.0; 3],
+                    size: [40.0, 30.0, 20.0],
+                },
+                body: BodyMode::NewBody,
+            },
+        );
+        let body = BodyId {
+            feature: b,
+            index: 0,
+        };
+        let mut s = Sketch::new();
+        s.add_circle([20.0, 15.0], 5.0);
+        let top = Plane {
+            origin: [0.0, 0.0, 20.0],
+            ..Plane::XY
+        };
+        let sk = doc.add_feature(
+            "",
+            FeatureKind::Sketch {
+                plane: top,
+                sketch: s,
+                on_body: Some(body),
+                attach: Some(FaceAttach {
+                    normal: [0.0, 0.0, 1.0],
+                    offset: 20.0,
+                    anchor: [20.0, 15.0, 20.0],
+                }),
+            },
+        );
+        let ex = doc.add_feature(
+            "",
+            FeatureKind::Extrude {
+                sketch: sk,
+                profiles: ProfileSelection::All,
+                distance: 10.0,
+                symmetric: false,
+                body: BodyMode::Join { target: body },
+            },
+        );
+        let mut ed = Editor::new(doc);
+        assert_eq!(ed.model().status[&ex], FeatureStatus::Ok);
+        assert!((ed.model().bodies[&body].mesh.bbox_max[2] - 30.0).abs() < 1e-3);
+        // make the box taller: the sketch and the boss move up with the top face
+        ed.apply("taller", |d| {
+            if let FeatureKind::Primitive {
+                primitive: Primitive::Box { size, .. },
+                ..
+            } = &mut d.feature_mut(b).unwrap().kind
+            {
+                size[2] = 35.0;
+            }
+        });
+        assert_eq!(ed.model().status[&sk], FeatureStatus::Ok);
+        assert!((ed.model().sketch_plane(ed.doc(), sk).unwrap().origin[2] - 35.0).abs() < 1e-9);
+        let m = &ed.model().bodies[&body].mesh;
+        assert!((m.bbox_max[2] - 45.0).abs() < 1e-3, "{:?}", m.bbox_max);
+        let v = m.volume();
+        let exp = 40.0 * 30.0 * 35.0 + std::f64::consts::PI * 25.0 * 10.0;
+        assert!((v - exp).abs() / exp < 2e-3, "{v} vs {exp}");
+        // the body disappears (suppressed): sketch stays put and says why
+        ed.apply("suppress box", |d| {
+            d.feature_mut(b).unwrap().suppressed = true
+        });
+        assert!(matches!(ed.model().status[&sk], FeatureStatus::Warning(_)));
+        assert!((ed.model().sketch_plane(ed.doc(), sk).unwrap().origin[2] - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn extrude_region_of_crossing_circles() {
+        use calibro_sketch::Sketch;
+        let mut doc = Document::new();
+        let mut s = Sketch::new();
+        s.add_circle([0.0, 0.0], 10.0);
+        s.add_circle([10.0, 0.0], 10.0);
+        let sk = doc.add_feature(
+            "",
+            FeatureKind::Sketch {
+                plane: Plane::XY,
+                sketch: s,
+                on_body: None,
+                attach: None,
+            },
+        );
+        let ex = doc.add_feature(
+            "",
+            FeatureKind::Extrude {
+                sketch: sk,
+                profiles: ProfileSelection::Seeds {
+                    points: vec![[5.0, 0.0]],
+                }, // the lens
+                distance: 2.0,
+                symmetric: false,
+                body: BodyMode::NewBody,
+            },
+        );
+        let ed = Editor::new(doc);
+        assert_eq!(ed.model().profiles[&sk].len(), 3);
+        assert_eq!(
+            ed.model().status[&ex],
+            FeatureStatus::Ok,
+            "{:?}",
+            ed.model().status[&ex]
+        );
+        let lens = 200.0 * (0.5f64).acos() - 5.0 * 300f64.sqrt();
+        let v = vol(
+            &ed,
+            BodyId {
+                feature: ex,
+                index: 0,
+            },
+        );
+        assert!(
+            (v - 2.0 * lens).abs() / (2.0 * lens) < 1e-2,
+            "{v} vs {}",
+            2.0 * lens
+        );
     }
 
     #[test]
@@ -622,6 +756,7 @@ mod tests {
                 plane: Plane::XZ,
                 sketch: s,
                 on_body: None,
+                attach: None,
             },
         );
         let r = doc.add_feature(

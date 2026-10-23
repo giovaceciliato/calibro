@@ -39,7 +39,7 @@ column says how we approximate it.
 
 The application is a **working foundation**, not a finished Shapr3D equivalent. The largest
 gaps are general fillet/chamfer/shell (curved edges, corners, non-convex bodies — kernel-limited), topological naming (sketches on
-faces don't follow later edits of that face), sphere/torus booleans (kernel-limited), 2D
+faces now follow moves along their normal; fillet edges don't), sphere/torus booleans (kernel-limited), 2D
 drawings, and Parasolid/native CAD imports.
 
 ---
@@ -49,30 +49,30 @@ drawings, and Parasolid/native CAD imports.
 | Feature | Shapr3D evidence | Calibro status | Test | Where | Limitations · next action |
 |---|---|---|---|---|---|
 | Sketch on standard planes (Top/Front/Right) | [S1][S2] | Tested | unit + UI | `app/src/app.rs` `start_sketch` | — |
-| Sketch on a planar face of a body | [S1] | Tested | UI (sketch on top face) | `viewport.rs` plane pick, `panels.rs` | Plane is captured when the sketch is made; it does not follow later edits of that face (topological naming). Next: store face reference + re-resolve. |
+| Sketch on a planar face of a body | [S1] | Tested | UI + core `sketch_on_face_follows_the_face` | `start_sketch_on_face`, `resolve_face_attach` | Click a face + Space. The sketch remembers the face (normal, offset, anchor) and follows it when the face moves along its normal (format v3). Sideways moves of the face are not followed |
 | Line (chained polyline, closes on first point) | [S2] | Tested | UI | `viewport.rs` `sketch_input` | — |
-| Rectangle (with automatic H/V constraints) | [S2] | Tested | unit + UI | `calibro-sketch/model.rs` | Centre-rectangle variant: planned |
+| Rectangle (with automatic H/V constraints) | [S2] | Tested | unit + UI | `calibro-sketch/model.rs` | Centre rectangle tool added 2026-10-23 (app test `centre_rectangle_and_three_point_arc_tools`) |
 | Circle | [S2] | Tested | four app input/command tests + native UI, report §11 | `create_sketch_circle`, `viewport.rs interaction_tests` | Centre + circumference clicks, centre-drag-release, exact radius in Properties; undo/redo and cancellation checked |
-| Arc (centre, start, end) | [S2] | Tested | unit (arc regions + extruded slot) | | 3-point and tangent arcs: planned |
+| Arc (centre, start, end) | [S2] | Tested | unit (arc regions + extruded slot) | | 3-point arc tool added 2026-10-23 (app test). Tangent arc: planned |
 | Regular polygon | [S2] | Tested | unit (hexagon area exact) | | — |
 | Spline | [S2] | Planned | — | | Needs B-spline entity + solver handles; truck supports B-splines |
 | Ellipse | [S2] | Planned | — | | |
 | Sketch Pattern / Mirror of entities | [S2] | Planned | — | | |
 | Construction geometry | spec | Tested | unit | `Curve.construction` | — |
-| Point snapping (existing points, origin, grid) | [S2] auto-constraining | Tested | UI | `viewport.rs` | Midpoint/intersection snaps: planned |
+| Point snapping (existing points, origin, grid, line midpoints, curve crossings) | [S2] auto-constraining | Tested | UI + app test `snaps_to_line_midpoints_and_crossings` | `viewport.rs` | Midpoint/crossing snaps place the point but add no constraint yet |
 | Auto-constraints while drawing (H/V) | [S2] | Tested | UI ("H" glyphs) | | Auto perpendicular/tangent/coincident-on-curve: planned |
 | Coincident · Horizontal · Vertical · Parallel · Perpendicular | [S2] | Tested | unit | `solver.rs` | — |
 | Tangent (line–circle/arc, circle–circle) | [S2] | Tested | unit | | — |
 | Equal (length / radius) · Concentric · Midpoint | [S2] | Tested | unit | | — |
 | Symmetric | [S2] | Tested | unit | | — |
 | Fixed | spec | Tested | unit | | — |
-| Dimensions: distance, H/V distance, length, angle, radius, diameter | [S2] | Tested | unit + UI | | On-canvas dimension editing (click label to type): planned; values are edited in the inspector |
+| Dimensions: distance, H/V distance, length, angle, radius, diameter | [S2] | Tested | unit + UI + app test `dimension_label_edits_on_canvas` | | Click a dimension label in the sketch (Select tool) to type a new value on the canvas, or edit it in the inspector |
 | Constraint solver (Levenberg–Marquardt, DOF analysis) | [S2] states | Tested | unit (15) | `solver.rs` | Large sketches (>~300 entities) will be slow (dense solver). Next: sparse solver |
 | Fully / under / over-defined status, colours | [S2] | Tested | unit + UI | `panels.rs status_text` | Shapr3D colours curves green/blue; Calibro does the same |
 | Conflicting constraint rejection | [S2] | Tested | unit | `add_sketch_constraint` | — |
 | Drag points with constraints kept | spec | Tested | unit | `drag_point` | — |
-| Closed-region detection (holes, shared edges, arcs) | [S5] (extrude profiles) | Tested | unit (6) | `profile.rs` | Curves that cross without a shared endpoint are not split. Next: curve–curve intersection |
-| Trim / extend / offset / fillet in sketch | not verified in sources | Researched | — | | Planned for Stage 3 |
+| Closed-region detection (holes, shared edges, arcs, crossing curves) | [S5] (extrude profiles) | Tested | unit (8) + core `extrude_region_of_crossing_circles` | `profile.rs`, `intersect.rs` | Crossing/touching curves are split (line–line, line–circle, circle–circle); overlapping collinear lines are not merged |
+| Trim in sketch | not verified in sources | Tested | unit `trim_pieces` + app test + Xvfb (`docs/images/sketch-trim.png`) | `intersect::trim_curve`, Trim tool (T) | Extend / offset / sketch fillet: planned |
 | Project edges onto sketch | [S1] "Project" | Planned | — | | |
 | Import DWG/DXF into sketches | [S3] | Planned | — | | DXF is feasible in pure Rust; DWG is proprietary (Blocked-ish) |
 
@@ -86,7 +86,7 @@ drawings, and Parasolid/native CAD imports.
 | Join/cut from a sketch lying exactly on a face | [S5] | Tested | unit + UI | `extrude_with_overlap` | Workaround for a truck limitation (coplanar faces): tool is extended 0.2 mm into the body when the exact boolean fails |
 | Extrude drag handle in viewport | [S5] adaptive UI | Tested | UI | `viewport.rs handles` | — |
 | Revolve (sketch X/Y axis or a sketch line, any angle) | [S1][S7] | Tested | unit | `kernel::revolve` | — |
-| Box / Cylinder / Sphere primitives | — (Calibro convenience) | Tested | unit + UI | | — |
+| Box / Cylinder / Sphere primitives | — (Calibro convenience) | Tested | unit + UI | | Fixed 2026-10-23: spheres containing the origin meshed wrongly (+30 % volume); now built at the origin and moved. Torus primitive added in the kernel (used by STEP import) |
 | Boolean union / subtract / intersect | [S1] | Tested | unit + UI + probe | `kernel::boolean` | Works for planar & cylindrical faces. **Fails for spheres / revolved surfaces with poles and for exactly coplanar faces** (truck 0.4). Failure is reported, never crashes (native). See §8 |
 | Move / rotate / scale bodies (exact values) | spec | Tested | unit | `Transform` feature | Gizmo arrows translate only; rotate ring: planned |
 | Linear pattern | [S1] | Tested | unit | | — |
@@ -112,7 +112,7 @@ drawings, and Parasolid/native CAD imports.
 | Suppress / rollback marker | spec | Tested | unit (rollback) | | Suppress has UI but no dedicated test |
 | Undo / redo (whole document, gesture-merged) | spec | Tested | unit + UI | `editor.rs` | — |
 | Delete feature with dependents | spec | Tested | unit | | — |
-| Topological naming (references to faces/edges survive edits) | implied by [S4] | Planned | — | | Hard problem; Stage 3 design item |
+| Topological naming (references to faces/edges survive edits) | implied by [S4] | In progress | core test | `FaceAttach` | v1 done for sketches on faces (geometric signature). Fillet/chamfer edges are still stored as end points |
 
 ## 5. Viewport, rendering and interaction
 
@@ -126,7 +126,7 @@ drawings, and Parasolid/native CAD imports.
 | Materials (presets, colour, metallic, roughness, opacity) | [S1] | Tested | UI | `material_presets` | Textures: planned |
 | Face / body / edge selection, hover highlight | spec | Tested | unit (picking) + UI | `picking.rs` | Vertex selection only via measure snapping |
 | Sketch regions shown filled, hover/selected colours | Shapr3D-like | Tested | UI | | — |
-| Section view (X/Y/Z, offset, flip) | spec | Tested | UI | shader clip plane | Cut faces are not capped (hollow look). Next: stencil caps |
+| Section view (X/Y/Z, offset, flip) with filled cut faces | spec | Tested | kernel test `cap_of_box_with_hole` + Xvfb (`docs/images/section-caps.png`) | `kernel::section_cap` (CPU, cached) | Caps use the body colour, flat shading |
 | Measure distance (with vertex snapping), ΔX/ΔY/ΔZ | spec | Tested | UI | | Angle/radius measure: planned |
 | Body volume, surface area, size; face area; edge length | spec | Tested | UI | | From tessellation (≈0.03 % on test part) |
 | Drag handles (extrude distance, move arrows) | [S5] | Tested | UI (extrude) | | Move arrows implemented, not UI-tested |
@@ -134,7 +134,7 @@ drawings, and Parasolid/native CAD imports.
 | Shadows, ambient occlusion, reflections of other bodies | spec | Planned | — | | Stage 5 rendering work |
 | High-quality image export (PNG of viewport) | [S1] renders | Implemented | GPU readback tested; dialog not testable here | `save_image` | Desktop only; supersampled export: planned |
 | Photoreal rendering / AI renders / AR / Vision Pro | [S1] | Researched | — | | Out of scope for now; AR needs native mobile |
-| Seam edges on cylinders hidden | Shapr3D-like | Planned | — | | Cylinder seams are drawn as edges today |
+| Smooth edges (cylinder seams, tangent joins) hidden | Shapr3D-like | Tested | kernel test `smooth_seams_are_hidden` | `is_smooth_edge` | Fillet boundaries stay visible (our fillets meet faces at ~5°) |
 
 ## 6. Files and interoperability
 
@@ -149,7 +149,7 @@ drawings, and Parasolid/native CAD imports.
 | Crash recovery (autosave of unsaved work every 20 s) | spec | Implemented | — | `eframe::App::save` | Imported meshes are not included in the recovery copy |
 | Open file from command line / "Open with" | — | Tested | UI | `CalibroApp::new` | — |
 | STEP export (exact B-rep) | [S3] | Tested | unit + **Open CASCADE reads it: valid solid** | `export_step` | Boolean intersection curves are written as polylines (tiny deviation, 0.016 % volume) |
-| STEP import | [S3] | Tested | unit (re-import own STEP) | `import_step` | Imported as **reference mesh**, not editable B-rep yet |
+| STEP import as editable solids | [S3] | Tested | `tests/step_solids.rs` (files written by Open CASCADE: fillets+hole, sphere, torus, cone; volumes vs OCC; boolean on the import), `own_step_reimports_as_solids` + Xvfb | `step_solid.rs` | Planes, cylinders, cones, revolutions, B-spline/NURBS exact; full spheres/tori rebuilt; seam faces split; curves that are only trimmed by vertices are extracted (approximated by a polyline when not a line/arc). Files that don't convert fall back to the reference mesh |
 | STL export binary/ASCII (watertight) | [S3] | Tested | unit + **trimesh: watertight** | | — |
 | STL import | [S3] (reference only) | Tested | unit | | Reference mesh |
 | OBJ + MTL export (Y-up, colours) | [S3] | Tested | unit + trimesh | | — |
@@ -157,7 +157,7 @@ drawings, and Parasolid/native CAD imports.
 | glTF binary (.glb) export (PBR, metres, Y-up) | [S3] | Tested | unit + trimesh | | Textures: n/a yet |
 | Export selected bodies vs all visible | spec | Implemented | — | | — |
 | IGES import/export | [S3] | Planned | — | | No maintained pure-Rust IGES library found; would need own writer |
-| 3MF export | [S3] | Planned | — | | Simple XML+ZIP; good next format |
+| 3MF export | [S3] | Tested | unit `three_mf_package` (watertight, volume) + **trimesh reads it: watertight, same volume** | `export_3mf` | Colours as base materials; no textures |
 | USDZ export | [S3] | Planned | — | | |
 | FBX | spec | Researched | — | | No reliable Rust FBX writer; recommend GLB instead (Blender, Maya, C4D, 3ds Max all read glTF) |
 | Parasolid X_T/X_B, SLDPRT, CATIA, NX, Creo, JT | [S3] | **Blocked** | — | | Proprietary formats/kernels; licensing required |
@@ -203,11 +203,11 @@ feature history, native format, STEP/STL/OBJ/GLB, wgpu viewport, full UI shell, 
 
 **Stage 2 — next session (recommended order):**
 1. Run CI on GitHub; fix anything the WebAssembly build reports; publish the web app.
-2. Sketch: on-canvas dimension editing, trim/extend, curve–curve intersection splitting, splines.
-3. Topological naming v1: sketches on faces store (body, face signature) and re-resolve.
+2. Sketch: ~~on-canvas dimension editing, trim, curve–curve intersection splitting~~ (done 2026-10-23); extend, offset, splines.
+3. ~~Topological naming v1 for sketches on faces~~ (done); next: fillet/chamfer edge references.
 4. ~~Chamfer (planar), Shell (planar), simple Loft (two profiles)~~ — done 2026-10-23 together with straight-edge fillet and line/arc sweep. Next: cylindrical shell, corner fillets.
-5. 3MF export; IGES export study; STEP import as editable B-rep (convert stepio geometry).
-6. Hide tangent seam edges; capped section view; supersampled image export.
+5. ~~3MF export; STEP import as editable B-rep~~ (done 2026-10-23); IGES export study.
+6. ~~Hide tangent seam edges; capped section view~~ (done); supersampled image export.
 
 **Stage 3+:** fillets (kernel strategy decision), sweep, patterns along paths, 2D drawings,
 assemblies, materials with textures and HDR lighting, touch-first iPad layout.

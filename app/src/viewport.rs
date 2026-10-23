@@ -86,8 +86,15 @@ fn sketch_cursor(
             }
         }
     }
+    let feature_snap = if snapped.is_none() {
+        snap_features(sk, &screen, pointer)
+    } else {
+        None
+    };
     if let Some(id) = snapped {
         pos = sk.points[&id].xy();
+    } else if let Some(q) = feature_snap {
+        pos = q;
     } else if screen([0.0, 0.0]).is_some_and(|p| (p - pointer).length() < SNAP_PX) {
         pos = [0.0, 0.0];
     } else if grid_snap {
@@ -98,6 +105,160 @@ fn sketch_cursor(
         ];
     }
     Some((pos, snapped))
+}
+
+/// Circle through `a`, `b` and `m`: its centre, and whether going counter-clockwise from
+/// `a` to `b` passes through `m`. None when the points are collinear.
+pub fn arc_through(a: [f64; 2], b: [f64; 2], m: [f64; 2]) -> Option<([f64; 2], bool)> {
+    let d = 2.0 * (a[0] * (b[1] - m[1]) + b[0] * (m[1] - a[1]) + m[0] * (a[1] - b[1]));
+    let scale = (b[0] - a[0]).hypot(b[1] - a[1]).max(1e-9);
+    if d.abs() < 1e-9 * scale * scale {
+        return None;
+    }
+    let sq = |p: [f64; 2]| p[0] * p[0] + p[1] * p[1];
+    let cx = (sq(a) * (b[1] - m[1]) + sq(b) * (m[1] - a[1]) + sq(m) * (a[1] - b[1])) / d;
+    let cy = (sq(a) * (m[0] - b[0]) + sq(b) * (a[0] - m[0]) + sq(m) * (b[0] - a[0])) / d;
+    let ang = |p: [f64; 2]| (p[1] - cy).atan2(p[0] - cx);
+    let tau = std::f64::consts::TAU;
+    let to_b = (ang(b) - ang(a)).rem_euclid(tau);
+    let to_m = (ang(m) - ang(a)).rem_euclid(tau);
+    Some(([cx, cy], to_m < to_b))
+}
+
+/// Where a constraint's glyph or dimension label is anchored, in sketch coordinates.
+fn constraint_anchor(sk: &Sketch, c: &Constraint) -> Option<[f64; 2]> {
+    let mid = |c: u32| -> Option<[f64; 2]> {
+        match sk.curves.get(&c)?.kind {
+            CurveKind::Line { a, b } => {
+                let (pa, pb) = (sk.points.get(&a)?, sk.points.get(&b)?);
+                Some([(pa.x + pb.x) * 0.5, (pa.y + pb.y) * 0.5])
+            }
+            CurveKind::Circle { center, radius } => {
+                let c = sk.points.get(&center)?;
+                Some([c.x + radius * 0.707, c.y + radius * 0.707])
+            }
+            CurveKind::Arc { center, start, .. } => {
+                let c = sk.points.get(&center)?;
+                let s = sk.points.get(&start)?;
+                Some([(c.x + s.x) * 0.5, (c.y + s.y) * 0.5])
+            }
+        }
+    };
+    match c {
+        Constraint::Horizontal { line } | Constraint::Vertical { line } => mid(*line),
+        Constraint::Parallel { a, .. }
+        | Constraint::Perpendicular { a, .. }
+        | Constraint::Equal { a, .. }
+        | Constraint::Tangent { a, .. }
+        | Constraint::Concentric { a, .. } => mid(*a),
+        Constraint::Length { line, .. } => mid(*line),
+        Constraint::Radius { curve, .. } | Constraint::Diameter { curve, .. } => mid(*curve),
+        Constraint::Angle { b, .. } => mid(*b),
+        Constraint::Distance { a, b, .. }
+        | Constraint::HorizontalDistance { a, b, .. }
+        | Constraint::VerticalDistance { a, b, .. } => {
+            let (pa, pb) = (sk.points.get(a)?, sk.points.get(b)?);
+            Some([(pa.x + pb.x) * 0.5, (pa.y + pb.y) * 0.5])
+        }
+        Constraint::Fixed { point, .. } => sk.points.get(point).map(|p| p.xy()),
+        _ => None,
+    }
+}
+
+/// Screen offset of a constraint label from its anchor.
+fn label_offset(c: &Constraint) -> egui::Vec2 {
+    if c.is_dimension() {
+        egui::vec2(0.0, -12.0)
+    } else {
+        egui::vec2(10.0, 10.0)
+    }
+}
+
+/// Dimension label under screen point `p` (viewport-local), if any.
+fn dimension_at(view: &CameraView, plane: &Plane, sk: &Sketch, p: Vec2) -> Option<(u32, Vec2)> {
+    let mut best: Option<(u32, Vec2, f32)> = None;
+    for (cid, c) in &sk.constraints {
+        if !c.is_dimension() {
+            continue;
+        }
+        let Some(a) = constraint_anchor(sk, c) else {
+            continue;
+        };
+        let Some(sp) = view.project(DVec3::from(plane.to_world(a))) else {
+            continue;
+        };
+        let off = label_offset(c);
+        let at = sp + Vec2::new(off.x, off.y);
+        let d = (Vec2::new((at.x - p.x).abs() / 2.2, at.y - p.y)).length();
+        if d < 10.0 && best.map(|b| d < b.2).unwrap_or(true) {
+            best = Some((*cid, at, d));
+        }
+    }
+    best.map(|b| (b.0, b.1))
+}
+
+/// The sketch curve drawn closest to screen point `p` (within 8 px).
+fn curve_near(view: &CameraView, plane: &Plane, sk: &Sketch, p: Vec2) -> Option<u32> {
+    let mut best: Option<(u32, f32)> = None;
+    for (id, _, pts) in sketch_polylines(sk) {
+        for w in pts.windows(2) {
+            let (Some(a), Some(b)) = (
+                view.project(DVec3::from(plane.to_world(w[0]))),
+                view.project(DVec3::from(plane.to_world(w[1]))),
+            ) else {
+                continue;
+            };
+            let ab = b - a;
+            let t = if ab.length_squared() > 0.0 {
+                ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let d = (a + ab * t - p).length();
+            if d < 8.0 && best.map(|b| d < b.1).unwrap_or(true) {
+                best = Some((id, d));
+            }
+        }
+    }
+    best.map(|b| b.0)
+}
+
+/// Snap targets that are not sketch points: midpoints of lines and the places where
+/// curves cross. Returns the closest one within the snap radius.
+fn snap_features(
+    sk: &Sketch,
+    screen: &dyn Fn([f64; 2]) -> Option<Vec2>,
+    pointer: Vec2,
+) -> Option<[f64; 2]> {
+    use calibro_core::sketch::intersect::{curve_segment, intersections};
+    let segs: Vec<calibro_core::sketch::Segment> = sk
+        .curves
+        .keys()
+        .filter_map(|id| curve_segment(sk, *id))
+        .collect();
+    let mut cands: Vec<[f64; 2]> = Vec::new();
+    for s in &segs {
+        if let calibro_core::sketch::Segment::Line { from, to } = s {
+            cands.push([(from[0] + to[0]) * 0.5, (from[1] + to[1]) * 0.5]);
+        }
+    }
+    if segs.len() <= 200 {
+        for i in 0..segs.len() {
+            for j in i + 1..segs.len() {
+                cands.extend(intersections(&segs[i], &segs[j]));
+            }
+        }
+    }
+    let mut best: Option<([f64; 2], f32)> = None;
+    for c in cands {
+        if let Some(p) = screen(c) {
+            let d = (p - pointer).length();
+            if d < SNAP_PX && best.map(|b| d < b.1).unwrap_or(true) {
+                best = Some((c, d));
+            }
+        }
+    }
+    best.map(|b| b.0)
 }
 
 /// Polylines (in sketch coordinates) for every curve: (curve id, construction, points).
@@ -206,6 +367,7 @@ impl CalibroApp {
 
                 let painter = ui.painter_at(rect);
                 self.draw_overlays(&painter, rect, &view, pointer);
+                self.dimension_editor(ui);
                 self.viewport_buttons(ui, rect);
                 if self.ed.doc().features.is_empty()
                     && self.sketch.is_none()
@@ -363,6 +525,11 @@ impl CalibroApp {
             let FeatureKind::Sketch { plane, .. } = &f.kind else {
                 continue;
             };
+            let plane = &self
+                .ed
+                .model()
+                .sketch_plane(self.ed.doc(), f.id)
+                .unwrap_or(*plane);
             if f.hidden || self.ed.model().status.get(&f.id) == Some(&FeatureStatus::RolledBack) {
                 continue;
             }
@@ -478,10 +645,15 @@ impl CalibroApp {
             if let Some(e) =
                 picking::pick_edge(view, p, 6.0, meshes.iter().map(|(id, m)| (*id, &**m)))
             {
-                if face
-                    .map(|f| f.body == e.body || (view.eye - e.point).length() <= f.t + 1e-3)
-                    .unwrap_or(true)
-                {
+                // an edge counts only if it is not hidden behind the face under the cursor
+                // (edges on the far side of the same body used to be picked through it)
+                let visible = face
+                    .map(|f| {
+                        let te = (e.point - ray.origin).dot(ray.dir);
+                        te <= f.t + f.t.abs() * 2e-3 + view.pixel_size_at(e.point) * 3.0
+                    })
+                    .unwrap_or(true);
+                if visible {
                     if !add {
                         self.sel = Selection::default();
                     }
@@ -559,7 +731,14 @@ impl CalibroApp {
     fn active_sketch(&self) -> Option<(FeatureId, Plane, Sketch)> {
         let fid = self.sketch.as_ref()?.feature;
         match self.ed.doc().feature(fid).map(|f| &f.kind) {
-            Some(FeatureKind::Sketch { plane, sketch, .. }) => Some((fid, *plane, sketch.clone())),
+            Some(FeatureKind::Sketch { plane, sketch, .. }) => Some((
+                fid,
+                self.ed
+                    .model()
+                    .sketch_plane(self.ed.doc(), fid)
+                    .unwrap_or(*plane),
+                sketch.clone(),
+            )),
             _ => None,
         }
     }
@@ -648,6 +827,32 @@ impl CalibroApp {
             self.sketch_select(ui, resp, view, &plane, &sk, p, pos, snapped, fid);
             return;
         }
+        if tool == Tool::Trim {
+            if resp.clicked_by(egui::PointerButton::Primary) {
+                if let Some(cid) = curve_near(view, &plane, &sk, p) {
+                    // exact point under the cursor on the sketch plane
+                    let ray = view.ray(p);
+                    let at = picking::ray_plane(
+                        &ray,
+                        DVec3::from(plane.origin),
+                        DVec3::from(plane.normal()),
+                    )
+                    .map(|h| plane.to_local(h.to_array()))
+                    .unwrap_or(pos);
+                    let res = self.ed.apply("Trim", |d| {
+                        let (_, s) = d.sketch_mut(fid).unwrap();
+                        let r = calibro_core::sketch::trim_curve(s, cid, at);
+                        let _ = calibro_core::sketch::solve(s);
+                        r
+                    });
+                    self.sel.clear_sketch();
+                    if let Err(e) = res {
+                        self.error(e);
+                    }
+                }
+            }
+            return;
+        }
         if !resp.clicked_by(egui::PointerButton::Primary) {
             return;
         }
@@ -696,7 +901,7 @@ impl CalibroApp {
                     s.clicks.push(click);
                 }
             }
-            Tool::Rectangle | Tool::Polygon => {
+            Tool::Rectangle | Tool::CenterRectangle | Tool::Polygon => {
                 if s.clicks.is_empty() {
                     s.clicks.push(click);
                     return;
@@ -708,7 +913,7 @@ impl CalibroApp {
                     return;
                 }
                 let label = match tool {
-                    Tool::Rectangle => "Draw rectangle",
+                    Tool::Rectangle | Tool::CenterRectangle => "Draw rectangle",
                     _ => "Draw polygon",
                 };
                 self.ed.apply(label, |d| {
@@ -716,6 +921,12 @@ impl CalibroApp {
                     match tool {
                         Tool::Rectangle => {
                             sk.add_rectangle(c0, pos);
+                        }
+                        Tool::CenterRectangle => {
+                            let opposite = [2.0 * c0[0] - pos[0], 2.0 * c0[1] - pos[1]];
+                            if (pos[0] - c0[0]).abs() > 1e-9 && (pos[1] - c0[1]).abs() > 1e-9 {
+                                sk.add_rectangle(opposite, pos);
+                            }
                         }
                         _ => {
                             sk.add_polygon(c0, r, sides as usize);
@@ -747,6 +958,31 @@ impl CalibroApp {
                     let sp = sid.unwrap_or_else(|| sk.add_point(st[0], st[1]));
                     let ep = eid.unwrap_or_else(|| sk.add_point(en[0], en[1]));
                     sk.add_arc(cp, sp, ep);
+                    let _ = calibro_core::sketch::solve(sk);
+                });
+            }
+            Tool::Arc3 => {
+                s.clicks.push(click);
+                if s.clicks.len() < 3 {
+                    return;
+                }
+                let [(a, aid), (b, bid), (m, _)] = [s.clicks[0], s.clicks[1], s.clicks[2]];
+                s.clicks.clear();
+                let Some((c, ccw_from_a)) = arc_through(a, b, m) else {
+                    self.error("The three points are on a straight line");
+                    return;
+                };
+                self.ed.apply("Draw arc", |d| {
+                    let (_, sk) = d.sketch_mut(fid).unwrap();
+                    let cp = sk.add_point(c[0], c[1]);
+                    let ap = aid.unwrap_or_else(|| sk.add_point(a[0], a[1]));
+                    let bp = bid.unwrap_or_else(|| sk.add_point(b[0], b[1]));
+                    // arcs run counter-clockwise from start to end
+                    if ccw_from_a {
+                        sk.add_arc(cp, ap, bp);
+                    } else {
+                        sk.add_arc(cp, bp, ap);
+                    }
                     let _ = calibro_core::sketch::solve(sk);
                 });
             }
@@ -813,6 +1049,25 @@ impl CalibroApp {
             return;
         }
         let _ = pos;
+        // click on a dimension label: edit its value right there (like Shapr3D)
+        if let Some((cid, at)) = dimension_at(view, plane, sk, p) {
+            let units = self.ed.doc().units;
+            let text = match sk.constraints.get(&cid) {
+                Some(Constraint::Angle { degrees, .. }) => format!("{degrees:.3}"),
+                Some(c) => {
+                    let v = c.clone().value_mut().copied().unwrap_or(0.0) / units.in_mm();
+                    format!("{v:.3}")
+                }
+                None => return,
+            };
+            let text = text.trim_end_matches('0').trim_end_matches('.').to_string();
+            let screen = Pos2::new(resp.rect.min.x + at.x, resp.rect.min.y + at.y);
+            if let Some(s) = self.sketch.as_mut() {
+                s.dim_edit = Some((cid, text, screen));
+            }
+            self.sel.sk_constraint = Some(cid);
+            return;
+        }
         if !add {
             self.sel.clear_sketch();
         }
@@ -825,28 +1080,7 @@ impl CalibroApp {
             return;
         }
         // nearest curve on screen
-        let mut best: Option<(u32, f32)> = None;
-        for (id, _, pts) in sketch_polylines(sk) {
-            for w in pts.windows(2) {
-                let (Some(a), Some(b)) = (
-                    view.project(DVec3::from(plane.to_world(w[0]))),
-                    view.project(DVec3::from(plane.to_world(w[1]))),
-                ) else {
-                    continue;
-                };
-                let ab = b - a;
-                let t = if ab.length_squared() > 0.0 {
-                    ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                };
-                let d = (a + ab * t - p).length();
-                if d < 8.0 && best.map(|b| d < b.1).unwrap_or(true) {
-                    best = Some((id, d));
-                }
-            }
-        }
-        if let Some((id, _)) = best {
+        if let Some(id) = curve_near(view, plane, sk, p) {
             if let Some(i) = self.sel.sk_curves.iter().position(|x| *x == id) {
                 self.sel.sk_curves.remove(i);
             } else {
@@ -913,6 +1147,11 @@ impl CalibroApp {
                 else {
                     return out;
                 };
+                let plane = &self
+                    .ed
+                    .model()
+                    .sketch_plane(self.ed.doc(), *sketch)
+                    .unwrap_or(*plane);
                 let seed = match profiles {
                     ProfileSelection::Seeds { points } if !points.is_empty() => points[0],
                     _ => self
@@ -1288,9 +1527,15 @@ impl CalibroApp {
             .features
             .iter()
             .filter_map(|f| match &f.kind {
-                FeatureKind::Sketch { plane, sketch, .. } => {
-                    Some((f.id, *plane, sketch.clone(), f.hidden))
-                }
+                FeatureKind::Sketch { plane, sketch, .. } => Some((
+                    f.id,
+                    self.ed
+                        .model()
+                        .sketch_plane(self.ed.doc(), f.id)
+                        .unwrap_or(*plane),
+                    sketch.clone(),
+                    f.hidden,
+                )),
                 _ => None,
             })
             .collect();
@@ -1404,6 +1649,62 @@ impl CalibroApp {
                 color: [0.1, 0.1, 0.1, 1.0],
             });
         }
+        // section view: fill the cut so bodies look solid (computed on the CPU, cached)
+        if let Some((n, d)) = self.clip_plane() {
+            let plane_key = [n.x.to_bits(), n.y.to_bits(), n.z.to_bits(), d.to_bits()];
+            let lift = view.pixel_size_at(n * d) * 0.5;
+            let visible: Vec<(
+                BodyId,
+                std::sync::Arc<calibro_core::kernel::BodyMesh>,
+                [f32; 4],
+            )> = self
+                .ed
+                .model()
+                .bodies
+                .values()
+                .filter(|b| {
+                    self.ed
+                        .doc()
+                        .body_props(b.id)
+                        .map(|p| p.visible)
+                        .unwrap_or(true)
+                })
+                .map(|b| {
+                    let c = self
+                        .ed
+                        .doc()
+                        .body_props(b.id)
+                        .map(|p| p.material.color)
+                        .unwrap_or([0.7, 0.72, 0.75, 1.0]);
+                    (b.id, b.mesh.clone(), c)
+                })
+                .collect();
+            self.cap_cache
+                .retain(|id, _| visible.iter().any(|v| v.0 == *id));
+            for (id, mesh, c) in visible {
+                let ptr = std::sync::Arc::as_ptr(&mesh) as usize;
+                let tris = match self.cap_cache.get(&id) {
+                    Some((p, k, t)) if *p == ptr && *k == plane_key => t.clone(),
+                    _ => {
+                        let t = std::sync::Arc::new(calibro_core::kernel::section_cap(
+                            &mesh,
+                            n.to_array(),
+                            d,
+                        ));
+                        self.cap_cache.insert(id, (ptr, plane_key, t.clone()));
+                        t
+                    }
+                };
+                // cut surface: body colour, a little darker, fully opaque; sits a hair
+                // inside the kept half so the clip test keeps it
+                let col = [c[0] * 0.8, c[1] * 0.8, c[2] * 0.8, 1.0];
+                let off = (-n * lift).as_vec3().to_array();
+                fills.extend(tris.iter().map(|p| LineVertex {
+                    pos: [p[0] + off[0], p[1] + off[1], p[2] + off[2]],
+                    color: col,
+                }));
+            }
+        }
         FrameInput {
             globals,
             bodies,
@@ -1414,6 +1715,65 @@ impl CalibroApp {
     }
 
     // ------------------------------------------------------------------ 2D overlays
+
+    /// Small text box over a dimension label (opened by clicking the label).
+    fn dimension_editor(&mut self, ui: &mut egui::Ui) {
+        let Some(s) = self.sketch.as_mut() else {
+            return;
+        };
+        let fid = s.feature;
+        let Some((cid, mut text, pos)) = s.dim_edit.clone() else {
+            return;
+        };
+        let mut commit = false;
+        let mut close = false;
+        egui::Area::new(egui::Id::unique("dim_edit"))
+            .fixed_pos(pos)
+            .pivot(Align2::CENTER_CENTER)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style())
+                    .inner_margin(4)
+                    .show(ui, |ui| {
+                        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(70.0));
+                        if !r.has_focus() && !r.lost_focus() {
+                            r.request_focus();
+                        }
+                        if r.lost_focus() {
+                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                close = true;
+                            } else {
+                                commit = true;
+                            }
+                        }
+                    });
+            });
+        if let Some(s) = self.sketch.as_mut() {
+            s.dim_edit = if commit || close {
+                None
+            } else {
+                Some((cid, text.clone(), pos))
+            };
+        }
+        if commit {
+            let is_angle = matches!(
+                self.ed.doc().feature(fid).map(|f| &f.kind),
+                Some(FeatureKind::Sketch { sketch, .. })
+                    if matches!(sketch.constraints.get(&cid), Some(Constraint::Angle { .. }))
+            );
+            match text.trim().replace(',', ".").parse::<f64>() {
+                Ok(v) if v.is_finite() && (is_angle || v > 0.0) => {
+                    let value = if is_angle {
+                        v
+                    } else {
+                        v * self.ed.doc().units.in_mm()
+                    };
+                    self.set_dimension(fid, cid, value);
+                }
+                _ => self.error("Type a number, e.g. 25 or 12.5"),
+            }
+        }
+    }
 
     fn draw_overlays(
         &self,
@@ -1560,6 +1920,46 @@ impl CalibroApp {
                                     &format!("{} {}", fmt(len), units.suffix()),
                                     ACCENT,
                                 );
+                            }
+                        }
+                        Tool::CenterRectangle => {
+                            let o = [2.0 * f[0] - cur[0], 2.0 * f[1] - cur[1]];
+                            let corners = [o, [cur[0], o[1]], cur, [o[0], cur[1]], o];
+                            let pts: Vec<Pos2> = corners.iter().filter_map(|q| to(*q)).collect();
+                            painter.add(egui::Shape::line(pts, preview));
+                            label(
+                                painter,
+                                cp + egui::vec2(14.0, -14.0),
+                                &format!(
+                                    "{} x {}",
+                                    fmt(2.0 * (cur[0] - f[0]).abs()),
+                                    fmt(2.0 * (cur[1] - f[1]).abs())
+                                ),
+                                ACCENT,
+                            );
+                        }
+                        Tool::Arc3 => {
+                            if s.clicks.len() == 1 {
+                                if let Some(a) = to(f) {
+                                    painter.line_segment([a, cp], preview);
+                                }
+                            } else if let Some((b, _)) = s.clicks.get(1) {
+                                if let Some((c, ccw)) = arc_through(f, *b, cur) {
+                                    let r = (f[0] - c[0]).hypot(f[1] - c[1]);
+                                    let a0 = (f[1] - c[1]).atan2(f[0] - c[0]);
+                                    let a1 = (b[1] - c[1]).atan2(b[0] - c[0]);
+                                    let tau = std::f64::consts::TAU;
+                                    let (start, sweep) = if ccw {
+                                        (a0, (a1 - a0).rem_euclid(tau))
+                                    } else {
+                                        (a1, (a0 - a1).rem_euclid(tau))
+                                    };
+                                    let pts: Vec<Pos2> = arc_points(c, r, start, sweep, 64)
+                                        .into_iter()
+                                        .filter_map(to)
+                                        .collect();
+                                    painter.add(egui::Shape::line(pts, preview));
+                                }
                             }
                         }
                         Tool::Rectangle => {
@@ -2245,6 +2645,7 @@ mod interaction_tests {
                     plane: Plane::XY,
                     sketch,
                     on_body: None,
+                    attach: None,
                 },
             );
             let fid = doc.add_feature(
@@ -2322,5 +2723,156 @@ mod interaction_tests {
             unreachable!()
         };
         assert_eq!(transform.translate, [0.0; 3]);
+    }
+
+    fn sketch(h: &Harness) -> Sketch {
+        h.app.active_sketch().unwrap().2
+    }
+
+    #[test]
+    fn arc_through_three_points() {
+        let (c, ccw) = arc_through([10.0, 0.0], [-10.0, 0.0], [0.0, 10.0]).unwrap();
+        assert!(c[0].abs() < 1e-9 && c[1].abs() < 1e-9);
+        assert!(ccw);
+        let (_, ccw) = arc_through([10.0, 0.0], [-10.0, 0.0], [0.0, -10.0]).unwrap();
+        assert!(!ccw);
+        assert!(arc_through([0.0, 0.0], [1.0, 1.0], [2.0, 2.0]).is_none());
+    }
+
+    #[test]
+    fn centre_rectangle_and_three_point_arc_tools() {
+        let mut h = Harness::new(Plane::XY);
+        h.app.set_tool(Tool::CenterRectangle);
+        h.click([0.0, 0.0]);
+        h.click([10.0, 5.0]);
+        let sk = sketch(&h);
+        assert_eq!(sk.curves.len(), 4);
+        let (lo, hi) = sk.bounds().unwrap();
+        assert!(
+            (lo[0] + 10.0).abs() < 1e-3 && (lo[1] + 5.0).abs() < 1e-3,
+            "{lo:?}"
+        );
+        assert!(
+            (hi[0] - 10.0).abs() < 1e-3 && (hi[1] - 5.0).abs() < 1e-3,
+            "{hi:?}"
+        );
+
+        let mut h = Harness::new(Plane::XY);
+        h.app.set_tool(Tool::Arc3);
+        h.click([10.0, 0.0]);
+        h.click([-10.0, 0.0]);
+        h.click([0.0, 10.0]);
+        let sk = sketch(&h);
+        let arc = sk.curves.values().next().unwrap().kind;
+        let CurveKind::Arc { center, start, end } = arc else {
+            panic!("expected an arc, got {arc:?}")
+        };
+        let c = sk.points[&center].xy();
+        assert!(c[0].abs() < 1e-3 && c[1].abs() < 1e-3, "{c:?}");
+        assert!(
+            (sk.points[&start].x - 10.0).abs() < 1e-3,
+            "arc must start at the first click"
+        );
+        assert!((sk.points[&end].x + 10.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn trim_tool_cuts_the_clicked_piece() {
+        let mut h = Harness::new(Plane::XY);
+        h.click([0.0, 0.0]);
+        h.click([10.0, 0.0]); // circle r=10
+        h.app.set_tool(Tool::Line);
+        h.click([-20.0, 0.0]);
+        h.click([20.0, 0.0]);
+        h.key(egui::Key::Escape);
+        h.app.set_tool(Tool::Trim);
+        h.click([0.0, -10.0]); // lower half of the circle
+        let sk = sketch(&h);
+        assert!(
+            sk.curves
+                .values()
+                .any(|c| matches!(c.kind, CurveKind::Arc { .. })),
+            "{:?}",
+            sk.curves
+        );
+        assert!(!sk
+            .curves
+            .values()
+            .any(|c| matches!(c.kind, CurveKind::Circle { .. })));
+        // one Undo brings the circle back
+        h.app.ed.undo();
+        assert!(sketch(&h)
+            .curves
+            .values()
+            .any(|c| matches!(c.kind, CurveKind::Circle { .. })));
+    }
+
+    #[test]
+    fn dimension_label_edits_on_canvas() {
+        let mut h = Harness::new(Plane::XY);
+        h.click([0.0, 0.0]);
+        h.click([10.0, 0.0]);
+        let fid = h.app.active_sketch().unwrap().0;
+        let curve = *sketch(&h).curves.keys().next().unwrap();
+        h.app
+            .add_sketch_constraint(fid, Constraint::Radius { curve, value: 10.0 });
+        h.app.set_tool(Tool::Select);
+        h.input(vec![]);
+        let sk = sketch(&h);
+        let (cid, c) = sk
+            .constraints
+            .iter()
+            .find(|(_, c)| c.is_dimension())
+            .unwrap();
+        let anchor = constraint_anchor(&sk, c).unwrap();
+        let p = h.point(anchor) + label_offset(c);
+        h.button(p, true);
+        h.button(p, false);
+        assert!(
+            h.app.sketch.as_ref().unwrap().dim_edit.is_some(),
+            "editor should open"
+        );
+        h.input(vec![]); // editor takes focus
+        h.input(vec![egui::Event::Key {
+            key: egui::Key::A,
+            physical_key: Some(egui::Key::A),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        }]);
+        h.input(vec![egui::Event::Text("25".into())]);
+        h.key(egui::Key::Enter);
+        h.input(vec![]);
+        assert!(h.app.sketch.as_ref().unwrap().dim_edit.is_none());
+        let sk = sketch(&h);
+        assert_eq!(sk.constraints[cid].clone().value_mut().copied(), Some(25.0));
+        assert!((h.circle().1 - 25.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn snaps_to_line_midpoints_and_crossings() {
+        let mut h = Harness::new(Plane::XY);
+        h.app.set_tool(Tool::Line);
+        h.click([0.0, 0.0]);
+        h.click([20.0, 0.0]);
+        h.key(egui::Key::Escape);
+        h.click([0.0, -10.0]);
+        h.click([20.0, 10.0]); // crosses the first line at (10, 0)
+        h.key(egui::Key::Escape);
+        let (_, plane, sk) = h.app.active_sketch().unwrap();
+        let view = h.app.view.as_ref().unwrap();
+        let px = |xy: [f64; 2]| view.project(DVec3::from(plane.to_world(xy))).unwrap();
+        // a pointer 3 px away from the crossing snaps exactly onto it
+        let near = px([10.0, 0.0]) + Vec2::new(3.0, -2.0);
+        let (pos, id) = sketch_cursor(view, &plane, &sk, near, false).unwrap();
+        assert!(id.is_none());
+        assert!(
+            (pos[0] - 10.0).abs() < 1e-4 && pos[1].abs() < 1e-4,
+            "{pos:?}"
+        );
+        // midpoint of the second line
+        let near = px([10.0, 0.0]) + Vec2::new(0.0, 0.0);
+        let (pos, _) = sketch_cursor(view, &plane, &sk, near, false).unwrap();
+        assert!((pos[0] - 10.0).abs() < 1e-4);
     }
 }

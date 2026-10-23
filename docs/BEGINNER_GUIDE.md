@@ -213,6 +213,19 @@ Then open **http://127.0.0.1:8080** in Chrome, Edge, Safari or Firefox.
    it updates. **Ctrl+Z** undoes.
 8. **Ctrl+S** saves a `.calibro` project. *File → Export* creates STEP, GLB, OBJ or STL files.
 
+### Adjust fillets and chamfers with the mouse
+
+Select a straight edge (Shift+click adds more), then choose **Fillet** or **Chamfer**.
+A blue handle appears on the model with its current radius/size. Drag it right to increase
+or left to decrease the amount; the geometry and numeric Properties update while dragging.
+For an existing operation, select its row in History to show the handle again.
+
+- Hold **Shift** for fine adjustments, including changing precision mid-drag.
+- Release to confirm. **Ctrl+Z** undoes the whole drag in one step.
+- **Esc** cancels the drag and restores the starting size; **Enter** confirms it.
+- If a size cannot be applied, the last valid shape stays visible with a limit message.
+- The numeric **Radius**/**Distance** fields remain available for exact entry.
+
 Mouse: right-drag = orbit, middle-drag (or Shift+right-drag) = pan, wheel = zoom.
 All shortcuts: *Help → Keyboard shortcuts*.
 

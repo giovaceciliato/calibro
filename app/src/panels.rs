@@ -1334,6 +1334,7 @@ impl CalibroApp {
                     ui.label(if is_fillet { "Radius" } else { "Distance" });
                     changed |= length_edit(ui, radius, units);
                 });
+                ui.weak("Drag the blue handle on the model left/right to adjust. Shift: fine · Esc: cancel.");
                 ui.label(format!("{} edge(s)", edges.len()));
                 let same_body =
                     !self.sel.edges.is_empty() && self.sel.edges.iter().all(|e| e.0 == *body);

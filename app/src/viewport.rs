@@ -857,7 +857,7 @@ impl CalibroApp {
 
     // ------------------------------------------------------------------ drag handles
 
-    /// Extrude distance arrow, and move arrows for the transform being edited.
+    /// On-model controls for extrusion, transforms, fillet radius and chamfer size.
     fn handle_specs(&self, view: &CameraView) -> Vec<(HandleKind, DVec3, DVec3, f64, Color32)> {
         let mut out = Vec::new();
         if self.sketch.is_some() {
@@ -869,7 +869,38 @@ impl CalibroApp {
         let Some(f) = self.ed.doc().feature(fid) else {
             return out;
         };
+        if f.suppressed
+            || matches!(
+                self.ed.model().status.get(&fid),
+                Some(FeatureStatus::RolledBack)
+            )
+        {
+            return out;
+        }
         match &f.kind {
+            FeatureKind::Fillet {
+                edges,
+                radius: amount,
+                ..
+            }
+            | FeatureKind::Chamfer {
+                edges,
+                distance: amount,
+                ..
+            } => {
+                let Some(edge) = edges.first() else {
+                    return out;
+                };
+                if !amount.is_finite() {
+                    return out;
+                }
+                let center = (DVec3::from(edge[0]) + DVec3::from(edge[1])) * 0.5;
+                // A screen-horizontal rail stays usable from every viewing angle.
+                let right = DVec3::new(view.view.x_axis.x, view.view.y_axis.x, view.view.z_axis.x)
+                    .normalize();
+                let tip = center + right * (view.pixel_size_at(center) * 70.0 + amount);
+                out.push((HandleKind::EdgeAmount(fid), tip, right, *amount, ACCENT));
+            }
             FeatureKind::Extrude {
                 sketch,
                 profiles,
@@ -951,32 +982,76 @@ impl CalibroApp {
             resp.interact_pointer_pos()
                 .map(|q| Vec2::new(q.x - resp.rect.min.x, q.y - resp.rect.min.y))
         }) else {
+            if self.handle.is_some() && !ui.input(|i| i.pointer.primary_down()) {
+                self.handle = None;
+                self.ed.end_gesture();
+                return true;
+            }
             return self.handle.is_some();
         };
-        if let Some(h) = &self.handle {
-            if resp.dragged_by(egui::PointerButton::Primary) {
-                let delta = (p - h.start_px).dot(h.dir_screen) / h.px_per_unit.max(1e-6);
+        if self.handle.is_some() {
+            let released = resp.drag_stopped_by(egui::PointerButton::Primary);
+            let mut update = None;
+            if resp.dragged_by(egui::PointerButton::Primary) || released {
                 let fine = ui.input(|i| i.modifiers.shift);
+                let h = self.handle.as_mut().unwrap();
                 let step = if fine {
-                    0.1
+                    if matches!(h.kind, HandleKind::EdgeAmount(_)) {
+                        0.01
+                    } else {
+                        0.1
+                    }
                 } else {
                     nice_step(1.0 / h.px_per_unit as f64 * 4.0).max(0.1)
                 };
-                let mut v = h.start_value + delta as f64;
-                v = (v / step).round() * step;
-                let kind = h.kind;
+                let v = if matches!(h.kind, HandleKind::EdgeAmount(_)) {
+                    let delta = (p - h.last_px).dot(h.dir_screen) / h.px_per_unit.max(1e-6);
+                    if delta.abs() < 1e-6 {
+                        // Releasing Shift without moving must not snap a fine value coarsely.
+                        h.last_attempt
+                    } else {
+                        h.raw_value =
+                            (h.raw_value + delta as f64 * if fine { 0.1 } else { 1.0 }).max(0.01);
+                        ((h.raw_value / step).round() * step).max(step)
+                    }
+                } else {
+                    let delta = (p - h.start_px).dot(h.dir_screen) / h.px_per_unit.max(1e-6);
+                    ((h.start_value + delta as f64) / step).round() * step
+                };
+                h.last_px = p;
+                if (v - h.last_attempt).abs() > 1e-9 {
+                    h.last_attempt = v;
+                    update = Some((h.kind, v, step));
+                }
+            }
+            if let Some((kind, mut value, step)) = update {
                 match kind {
+                    HandleKind::EdgeAmount(fid) => {
+                        let result = self.set_edge_amount(fid, value);
+                        let had_error = self.handle.as_ref().unwrap().error.is_some();
+                        if let Err(reason) = &result {
+                            if !had_error {
+                                self.error(format!(
+                                    "Size limit: {reason}. Keeping the last valid size."
+                                ));
+                            }
+                        } else if had_error {
+                            self.info("Size updated");
+                        }
+                        self.handle.as_mut().unwrap().error = result.err();
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    }
                     HandleKind::ExtrudeDistance(fid) => {
-                        if v.abs() < 1e-9 {
-                            v = step;
+                        if value.abs() < 1e-9 {
+                            value = step;
                         }
                         self.ed.apply_coalesced("Edit Extrude", fid, |d| {
-                            let mut old = v;
+                            let mut old = value;
                             if let FeatureKind::Extrude { distance, .. } =
                                 &mut d.feature_mut(fid).unwrap().kind
                             {
                                 old = *distance;
-                                *distance = v;
+                                *distance = value;
                             }
                             d.auto_extrude_mode(fid, old);
                         });
@@ -986,18 +1061,25 @@ impl CalibroApp {
                             if let FeatureKind::Transform { transform, .. } =
                                 &mut d.feature_mut(fid).unwrap().kind
                             {
-                                transform.translate[axis] = v;
+                                transform.translate[axis] = value;
                             }
                         });
                     }
                 }
-                return true;
+                ui.ctx().request_repaint();
             }
-            self.handle = None;
+            if released || !resp.dragged_by(egui::PointerButton::Primary) {
+                self.handle = None;
+                self.ed.end_gesture();
+            }
             return true;
         }
         if !resp.drag_started_by(egui::PointerButton::Primary) {
-            return false;
+            // Clicking a handle without moving must not deselect its feature.
+            return resp.clicked_by(egui::PointerButton::Primary)
+                && self.handle_specs(view).iter().any(|(_, tip, _, _, _)| {
+                    view.project(*tip).is_some_and(|q| (q - p).length() <= 14.0)
+                });
         }
         // egui reports drag-start after a small movement: hit-test where the press began.
         let start = ui
@@ -1029,14 +1111,19 @@ impl CalibroApp {
                 }
                 _ => 1.0,
             };
+            self.ed.end_gesture();
             self.handle = Some(HandleDrag {
                 kind,
                 start_value: value,
                 start_px: start,
                 dir_screen: ds / len,
                 px_per_unit: len * k,
+                last_px: start,
+                raw_value: value,
+                last_attempt: value,
+                error: None,
             });
-            return true;
+            return self.handles(ui, resp, view, Some(p));
         }
         false
     }
@@ -1521,6 +1608,7 @@ impl CalibroApp {
             let base = match kind {
                 HandleKind::ExtrudeDistance(_) => tip - dir * value,
                 HandleKind::Translate(..) => tip - dir * view.pixel_size_at(tip) * 70.0,
+                HandleKind::EdgeAmount(_) => tip - dir * (view.pixel_size_at(tip) * 70.0 + value),
             };
             if let (Some(a), Some(b)) = (proj(base), proj(tip)) {
                 let active = self
@@ -1538,6 +1626,55 @@ impl CalibroApp {
                     if active || hovered { 9.0 } else { 7.0 },
                     Stroke::new(1.5, Color32::WHITE),
                 );
+                if let HandleKind::EdgeAmount(fid) = kind {
+                    if active || hovered {
+                        painter
+                            .ctx()
+                            .set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    }
+                    let chevron = |x: f32, direction: f32| {
+                        vec![
+                            b + egui::vec2(x - direction * 2.0, -3.0),
+                            b + egui::vec2(x, 0.0),
+                            b + egui::vec2(x - direction * 2.0, 3.0),
+                        ]
+                    };
+                    painter.add(egui::Shape::line(
+                        chevron(-4.0, -1.0),
+                        Stroke::new(1.3, Color32::WHITE),
+                    ));
+                    painter.add(egui::Shape::line(
+                        chevron(4.0, 1.0),
+                        Stroke::new(1.3, Color32::WHITE),
+                    ));
+                    let title = if matches!(
+                        self.ed.doc().feature(fid).map(|f| &f.kind),
+                        Some(FeatureKind::Fillet { .. })
+                    ) {
+                        "R"
+                    } else {
+                        "Chamfer"
+                    };
+                    label(
+                        painter,
+                        b + egui::vec2(24.0, -20.0),
+                        &format!("{title} {}", self.fmt_len(value)),
+                        col,
+                    );
+                    if active {
+                        let invalid = self.handle.as_ref().is_some_and(|h| h.error.is_some());
+                        label(
+                            painter,
+                            b + egui::vec2(0.0, 25.0),
+                            if invalid {
+                                "Limit reached · last valid size kept"
+                            } else {
+                                "Shift: fine · Esc: cancel"
+                            },
+                            if invalid { ERR_RED } else { crate::style::TEXT },
+                        );
+                    }
+                }
                 if let HandleKind::ExtrudeDistance(fid) = kind {
                     let mode = match self.ed.doc().feature(fid).map(|f| &f.kind) {
                         Some(FeatureKind::Extrude {
@@ -1700,7 +1837,7 @@ fn f32x3(p: [f64; 3]) -> [f32; 3] {
 }
 
 #[cfg(test)]
-mod circle_tests {
+mod interaction_tests {
     use super::*;
     use eframe::App;
 
@@ -1731,6 +1868,11 @@ mod circle_tests {
         }
 
         fn input(&mut self, events: Vec<egui::Event>) {
+            self.input_modifiers(events, egui::Modifiers::NONE);
+        }
+
+        fn input_modifiers(&mut self, mut events: Vec<egui::Event>, modifiers: egui::Modifiers) {
+            events.insert(0, egui::Event::ModifiersChanged(modifiers));
             self.time += 0.05;
             let raw = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1874,5 +2016,311 @@ mod circle_tests {
         assert_eq!(sketch.points.len(), 1);
         assert_eq!(h.circle(), ([10.0, 5.0], 12.5));
         assert_eq!(h.app.ed.model().profiles[&fid].len(), 1);
+    }
+
+    fn edge_harness(chamfer: bool) -> (Harness, FeatureId) {
+        let mut h = Harness::new(Plane::XY);
+        let mut doc = Document::new();
+        let base = doc.add_feature(
+            "Box",
+            FeatureKind::Primitive {
+                primitive: Primitive::Box {
+                    min: [0.0; 3],
+                    size: [30.0, 20.0, 10.0],
+                },
+                body: BodyMode::NewBody,
+            },
+        );
+        let body = BodyId {
+            feature: base,
+            index: 0,
+        };
+        let edges = vec![[[0.0, 0.0, 0.0], [30.0, 0.0, 0.0]]];
+        let feature = doc.add_feature(
+            "",
+            if chamfer {
+                FeatureKind::Chamfer {
+                    body,
+                    edges,
+                    distance: 1.0,
+                }
+            } else {
+                FeatureKind::Fillet {
+                    body,
+                    edges,
+                    radius: 1.0,
+                }
+            },
+        );
+        h.app.ed = Editor::new(doc);
+        assert_eq!(h.app.ed.model().status[&feature], FeatureStatus::Ok);
+        h.app.sketch = None;
+        h.app.tool = Tool::Select;
+        h.app.sel = Selection {
+            feature: Some(feature),
+            ..Default::default()
+        };
+        h.app.set_view("Iso");
+        h.app.zoom_to_fit();
+        h.input(vec![]);
+        h.input(vec![]);
+        h.app.ed.mark_saved();
+        (h, feature)
+    }
+
+    fn edge_value(app: &CalibroApp, fid: FeatureId) -> f64 {
+        match app.ed.doc().feature(fid).unwrap().kind {
+            FeatureKind::Fillet { radius, .. } => radius,
+            FeatureKind::Chamfer { distance, .. } => distance,
+            _ => panic!("expected edge modifier"),
+        }
+    }
+
+    fn edge_control(h: &Harness) -> (Pos2, f32) {
+        let view = h.app.view.as_ref().unwrap();
+        let (kind, tip, dir, _, _) = h.app.handle_specs(view)[0];
+        assert!(matches!(kind, HandleKind::EdgeAmount(_)));
+        let p = view.project(tip).unwrap();
+        let px_per_unit = (view.project(tip + dir).unwrap() - p).length();
+        (to_pos(h.app.viewport_rect, p), px_per_unit)
+    }
+
+    #[test]
+    fn fillet_and_chamfer_drag_update_live_and_release_as_one_undo() {
+        for chamfer in [false, true] {
+            let (mut h, fid) = edge_harness(chamfer);
+            let (start, scale) = edge_control(&h);
+            h.button(start, true);
+            h.input(vec![egui::Event::PointerMoved(
+                start + egui::vec2(scale, 0.0),
+            )]);
+            assert!(h.app.handle.is_some());
+            assert!(edge_value(&h.app, fid) > 1.0);
+            // The final pointer position arrives on release, not a separate move frame.
+            h.button(start + egui::vec2(scale * 2.0, 0.0), false);
+            assert!(h.app.handle.is_none());
+            let value = edge_value(&h.app, fid);
+            assert!((value - 3.0).abs() < 0.15, "{value}");
+            assert_eq!(h.app.ed.model().status[&fid], FeatureStatus::Ok);
+            assert_eq!(h.app.ed.model().bodies.len(), 1);
+            h.app.ed.undo();
+            assert_eq!(edge_value(&h.app, fid), 1.0);
+            h.app.ed.redo();
+            assert_eq!(edge_value(&h.app, fid), value);
+        }
+    }
+
+    #[test]
+    fn edge_drag_escape_restores_starting_geometry_and_dirty_flag() {
+        let (mut h, fid) = edge_harness(false);
+        let (start, scale) = edge_control(&h);
+        h.button(start, true);
+        h.input(vec![egui::Event::PointerMoved(
+            start + egui::vec2(scale * 2.0, 0.0),
+        )]);
+        assert!(h.app.ed.is_dirty());
+        h.key(egui::Key::Escape);
+        assert!(h.app.handle.is_none());
+        assert_eq!(edge_value(&h.app, fid), 1.0);
+        assert!(!h.app.ed.is_dirty());
+        h.button(start + egui::vec2(scale * 2.0, 0.0), false);
+        assert_eq!(edge_value(&h.app, fid), 1.0);
+    }
+
+    #[test]
+    fn invalid_edge_preview_keeps_last_valid_body_and_undo_history() {
+        for chamfer in [false, true] {
+            let (mut h, fid) = edge_harness(chamfer);
+            let before = h.app.ed.doc().clone();
+            let mesh = h
+                .app
+                .ed
+                .model()
+                .bodies
+                .values()
+                .next()
+                .unwrap()
+                .mesh
+                .clone();
+            assert!(h.app.set_edge_amount(fid, 1000.0).is_err());
+            assert_eq!(h.app.ed.doc(), &before);
+            assert!(!h.app.ed.is_dirty());
+            assert!(!h.app.ed.can_undo());
+            assert!(std::sync::Arc::ptr_eq(
+                &mesh,
+                &h.app.ed.model().bodies.values().next().unwrap().mesh
+            ));
+            assert!(h.app.set_edge_amount(fid, 2.0).is_ok());
+            assert_eq!(edge_value(&h.app, fid), 2.0);
+        }
+    }
+
+    #[test]
+    fn edge_handle_works_from_top_front_and_end_views_and_suppression_hides_it() {
+        let (mut h, fid) = edge_harness(true);
+        for name in ["Top", "Front", "Right"] {
+            h.app.set_view(name);
+            h.input(vec![]);
+            let (_, scale) = edge_control(&h);
+            assert!(scale > 0.0);
+        }
+        h.app.ed.apply("Suppress", |d| {
+            d.feature_mut(fid).unwrap().suppressed = true
+        });
+        assert!(h.app.handle_specs(h.app.view.as_ref().unwrap()).is_empty());
+    }
+
+    #[test]
+    fn edge_drag_shift_is_fine_and_modifier_release_does_not_jump() {
+        let (mut h, fid) = edge_harness(true);
+        let (start, scale) = edge_control(&h);
+        let end = start + egui::vec2(scale * 2.0, 0.0);
+        h.button(start, true);
+        h.input_modifiers(vec![egui::Event::PointerMoved(end)], egui::Modifiers::SHIFT);
+        assert!((edge_value(&h.app, fid) - 1.2).abs() < 0.02);
+        h.input(vec![]);
+        assert!((edge_value(&h.app, fid) - 1.2).abs() < 0.02);
+        h.button(end, false);
+        assert!((edge_value(&h.app, fid) - 1.2).abs() < 0.02);
+    }
+
+    #[test]
+    fn edge_preview_rejects_new_downstream_failures() {
+        let (mut h, fid) = edge_harness(true);
+        let (body, edge) = {
+            let b = h.app.ed.model().bodies.values().next().unwrap();
+            let edge = b
+                .mesh
+                .edges
+                .iter()
+                .find(|edge| {
+                    let a = edge.first().unwrap();
+                    let b = edge.last().unwrap();
+                    (a[0] - b[0]).abs() > 29.0
+                        && a[1].abs() < 0.1
+                        && b[1].abs() < 0.1
+                        && a[2] > 0.1
+                        && a[2] < 2.0
+                        && b[2] > 0.1
+                        && b[2] < 2.0
+                })
+                .expect("generated chamfer edge");
+            (
+                b.id,
+                [
+                    edge[0].map(|v| v as f64),
+                    edge.last().unwrap().map(|v| v as f64),
+                ],
+            )
+        };
+        let next = h.app.ed.apply("Later chamfer", |doc| {
+            doc.add_feature(
+                "",
+                FeatureKind::Chamfer {
+                    body,
+                    edges: vec![edge],
+                    distance: 0.2,
+                },
+            )
+        });
+        assert_eq!(h.app.ed.model().status[&next], FeatureStatus::Ok);
+        h.app.ed.mark_saved();
+        let result = h.app.set_edge_amount(fid, 2.0);
+        assert!(result.unwrap_err().contains("later feature"));
+        assert_eq!(edge_value(&h.app, fid), 1.0);
+        assert_eq!(h.app.ed.model().status[&next], FeatureStatus::Ok);
+        assert!(!h.app.ed.is_dirty());
+    }
+
+    #[test]
+    fn existing_extrude_handle_keeps_symmetric_scaling_and_one_undo() {
+        for symmetric in [false, true] {
+            let (mut h, _) = edge_harness(false);
+            let mut doc = Document::new();
+            let mut sketch = Sketch::new();
+            sketch.add_rectangle([0.0, 0.0], [20.0, 20.0]);
+            let sk = doc.add_feature(
+                "",
+                FeatureKind::Sketch {
+                    plane: Plane::XY,
+                    sketch,
+                    on_body: None,
+                },
+            );
+            let fid = doc.add_feature(
+                "",
+                FeatureKind::Extrude {
+                    sketch: sk,
+                    profiles: ProfileSelection::All,
+                    distance: 5.0,
+                    symmetric,
+                    body: BodyMode::NewBody,
+                },
+            );
+            h.app.ed = Editor::new(doc);
+            h.app.sel.feature = Some(fid);
+            h.app.set_view("Iso");
+            h.app.zoom_to_fit();
+            h.input(vec![]);
+            let view = h.app.view.as_ref().unwrap();
+            let (_, tip, dir, _, _) = h.app.handle_specs(view)[0];
+            let p = view.project(tip).unwrap();
+            let ds = view.project(tip + dir).unwrap() - p;
+            let start = to_pos(h.app.viewport_rect, p);
+            let movement = ds * if symmetric { 2.0 } else { 4.0 };
+            let movement = egui::vec2(movement.x, movement.y);
+            h.button(start, true);
+            h.input(vec![egui::Event::PointerMoved(start + movement * 0.75)]);
+            h.button(start + movement, false);
+            let FeatureKind::Extrude { distance, .. } = h.app.ed.doc().feature(fid).unwrap().kind
+            else {
+                unreachable!()
+            };
+            assert!((distance - 9.0).abs() < 0.2, "{distance}");
+            h.app.ed.undo();
+            let FeatureKind::Extrude { distance, .. } = h.app.ed.doc().feature(fid).unwrap().kind
+            else {
+                unreachable!()
+            };
+            assert_eq!(distance, 5.0);
+        }
+    }
+
+    #[test]
+    fn existing_translation_handle_still_moves_and_undoes_once() {
+        let (mut h, _) = edge_harness(false);
+        let body = *h.app.ed.model().bodies.keys().next().unwrap();
+        let fid = h.app.ed.apply("Move", |doc| {
+            doc.add_feature(
+                "",
+                FeatureKind::Transform {
+                    bodies: vec![body],
+                    transform: calibro_core::kernel::Transform::default(),
+                    copy: false,
+                },
+            )
+        });
+        h.app.sel.feature = Some(fid);
+        h.input(vec![]);
+        let view = h.app.view.as_ref().unwrap();
+        let (_, tip, dir, _, _) = h.app.handle_specs(view)[0];
+        let p = view.project(tip).unwrap();
+        let movement = (view.project(tip + dir).unwrap() - p) * 3.0;
+        let movement = egui::vec2(movement.x, movement.y);
+        let start = to_pos(h.app.viewport_rect, p);
+        h.button(start, true);
+        h.input(vec![egui::Event::PointerMoved(start + movement * 0.75)]);
+        h.button(start + movement, false);
+        let FeatureKind::Transform { transform, .. } = &h.app.ed.doc().feature(fid).unwrap().kind
+        else {
+            unreachable!()
+        };
+        assert!((transform.translate[0] - 3.0).abs() < 0.2);
+        h.app.ed.undo();
+        let FeatureKind::Transform { transform, .. } = &h.app.ed.doc().feature(fid).unwrap().kind
+        else {
+            unreachable!()
+        };
+        assert_eq!(transform.translate, [0.0; 3]);
     }
 }

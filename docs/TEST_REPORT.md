@@ -211,3 +211,30 @@ Keyboard tool changes also retained unfinished points from the prior sketch tool
   Finish sketch → select first region → E creates one cylindrical body (10 mm extrusion),
   inspected in isometric view. Browser/touch hardware and real desktop GPUs not retested.
 - No serialized document changes or project-format version change.
+
+
+## 12. Update — 23 Oct 2026 (fillet/chamfer mouse handles)
+
+- Selecting a Fillet or Chamfer feature now displays a blue bidirectional size control
+  anchored to its stored edge. Right/left drag adjusts radius/distance on the model, with
+  live geometry and Properties feedback. Screen-horizontal controls remain usable in
+  top/front/end views and apply the common value to all feature edges.
+- Shift gives 10× finer movement and 0.01 mm rounding; releasing Shift without moving does
+  not jump to coarse rounding. Release/Enter confirm; Escape restores the starting value.
+- Editor evaluates candidate changes through its existing recompute cache, then commits
+  accepted candidates as one coalesced undo step. Invalid values/new downstream failures
+  keep the prior document and model. Cancellation restores the dirty flag, previous redo
+  stack and any undo snapshot evicted at the history limit. No document-format changes.
+- Eight new app regression tests: both modifiers update during drag and on final release,
+  one-step undo/redo; Escape/dirty state; invalid preview retains original mesh; view angles
+  and suppression; Shift without jumps; downstream failure rejection; existing extrusion
+  (including symmetric scaling) and translation handle behavior.
+- Five new Editor regression tests: rejected preview preserves state/redo, cancellation
+  restores saved state/redo, coalesced undo/redo, no-op safety and history-limit cancellation.
+- Native UI on Xvfb/lavapipe with `examples/modify-tools.calibro`: Fillet radius 3 → 1 mm
+  while dragging ([screenshot](images/fillet-drag.png)); release then Undo restores 3 mm.
+  Chamfer distance 1 → 3 mm while dragging ([screenshot](images/chamfer-drag.png)); Escape
+  restores 1 mm and the clean saved state. All three bodies remain present.
+- Pinned Rust 1.97: formatting, Clippy with warnings denied, native build and full suite pass: **85 passed**, 0 failed, 1 diagnostic ignored.
+- Browser/touch hardware, real GPU drivers and performance on large models not retested.
+  Existing kernel restrictions on supported edge geometry remain unchanged.

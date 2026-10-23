@@ -1221,8 +1221,14 @@ impl CalibroApp {
         }
         if changed {
             let label = format!("Edit {}", f.kind.type_name());
-            self.ed
-                .apply_coalesced(&label, fid, |d| d.feature_mut(fid).unwrap().kind = k);
+            let old_distance = match &f.kind {
+                FeatureKind::Extrude { distance, .. } => *distance,
+                _ => 0.0,
+            };
+            self.ed.apply_coalesced(&label, fid, |d| {
+                d.feature_mut(fid).unwrap().kind = k;
+                d.auto_extrude_mode(fid, old_distance);
+            });
         }
         ui.separator();
         ui.horizontal(|ui| {

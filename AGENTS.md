@@ -54,6 +54,10 @@ _Last updated: 2026-10-23 (after commit d11b79d)._
   install/uninstall + launch verified on Ubuntu/Xvfb; RPM metadata checked with `rpm -qp`,
   `desktop-file-validate`, `appstreamcli validate`. RPM **not yet installed on a real Fedora**.
 - Packaging commit pushed to `main` (release.yml only runs on tags, so nothing is published until a release is created).
+- 2026-10-23: owner reported that pushing an extrusion into the body didn't remove material.
+  Fixed: `Document::auto_extrude_mode` switches Join↔Cut when the distance sign flips for a
+  sketch made on that body's face (handle turns red with a "cut" label). Also face-sketch
+  axes now follow world X (`Plane::from_origin_normal`) so H/V match the screen. 60 tests.
 - Not yet done: GitHub Release v0.1.0 (waiting for the owner's OK). Windows/macOS binaries
   have been built by CI but never launched on real machines.
 - Local working copies used by the 2026-10-22/23 sessions: `/home/claude/calibro` (original,
@@ -78,3 +82,4 @@ _Last updated: 2026-10-23 (after commit d11b79d)._
   release notes, added this handoff file.
 - 2026-10-23 (later) — Owner connected GitHub + installed the Claude app; pushed d11b79d; CI and Pages green; verified the live web app.
 - 2026-10-23 (later) — Built Fedora RPM + portable Linux package on request; added packaging to the release workflow (pushed to main; no release yet).
+- 2026-10-23 (later) — Shapr3D-style auto cut when extruding into a body; face-sketch axis orientation fix; rebuilt Fedora packages.

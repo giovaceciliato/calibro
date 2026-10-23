@@ -275,6 +275,67 @@ mod tests {
     }
 
     #[test]
+    fn pushing_a_face_sketch_inward_cuts_like_shapr3d() {
+        let (mut doc, _, ex, _) = plate_doc();
+        let body = BodyId {
+            feature: ex,
+            index: 0,
+        };
+        let mut s = Sketch::new();
+        s.add_rectangle([10.0, 5.0], [20.0, 15.0]);
+        let top = Plane {
+            origin: [0.0, 0.0, 5.0],
+            ..Plane::XY
+        };
+        let sk = doc.add_feature(
+            "",
+            FeatureKind::Sketch {
+                plane: top,
+                sketch: s,
+                on_body: Some(body),
+            },
+        );
+        let e2 = doc.add_feature(
+            "",
+            FeatureKind::Extrude {
+                sketch: sk,
+                profiles: ProfileSelection::All,
+                distance: 10.0,
+                symmetric: false,
+                body: BodyMode::Join { target: body },
+            },
+        );
+        let mut ed = Editor::new(doc);
+        let v0 = vol(&ed, body);
+        assert!((v0 - (4000.0 + 1000.0)).abs() < 1e-2, "{v0}");
+        // drag the distance to -3 (into the plate): becomes a pocket
+        ed.apply("drag", |d| {
+            if let FeatureKind::Extrude { distance, .. } = &mut d.feature_mut(e2).unwrap().kind {
+                *distance = -3.0;
+            }
+            assert!(d.auto_extrude_mode(e2, 10.0));
+        });
+        let v1 = vol(&ed, body);
+        assert!((v1 - (4000.0 - 300.0)).abs() < 1e-2, "{v1}");
+        // a second inward change keeps Cut; dragging back out returns to Join
+        ed.apply("drag", |d| {
+            if let FeatureKind::Extrude { distance, .. } = &mut d.feature_mut(e2).unwrap().kind {
+                *distance = 4.0;
+            }
+            assert!(d.auto_extrude_mode(e2, -3.0));
+        });
+        assert!((vol(&ed, body) - 4400.0).abs() < 1e-2);
+        // through-all cut (deeper than the plate) leaves a hole
+        ed.apply("drag", |d| {
+            if let FeatureKind::Extrude { distance, .. } = &mut d.feature_mut(e2).unwrap().kind {
+                *distance = -8.0;
+            }
+            d.auto_extrude_mode(e2, 4.0);
+        });
+        assert!((vol(&ed, body) - 3500.0).abs() < 1e-2, "{}", vol(&ed, body));
+    }
+
+    #[test]
     fn rollback_marker() {
         let (mut doc, _, ex, _) = plate_doc();
         doc.rollback = Some(1);

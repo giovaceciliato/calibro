@@ -541,6 +541,51 @@ impl Document {
         self.bodies.iter().find(|e| e.body == b).map(|e| &e.props)
     }
 
+    /// Shapr3D-style automatic join/cut for an extrusion drawn on a body's face:
+    /// pulling outward adds material (Join), pushing into the body removes it (Cut).
+    /// Applied only when the direction actually flips (the sign of `distance`
+    /// changes compared with `old_distance`), so an explicit user choice made in
+    /// the inspector is kept. Returns true if the mode was changed.
+    pub fn auto_extrude_mode(&mut self, fid: FeatureId, old_distance: f64) -> bool {
+        let Some(FeatureKind::Extrude {
+            sketch,
+            distance,
+            symmetric,
+            body,
+            ..
+        }) = self.feature(fid).map(|f| f.kind.clone())
+        else {
+            return false;
+        };
+        if symmetric || (distance > 0.0) == (old_distance > 0.0) {
+            return false;
+        }
+        let on_body = match self.feature(sketch).map(|f| &f.kind) {
+            Some(FeatureKind::Sketch {
+                on_body: Some(b), ..
+            }) => *b,
+            _ => return false,
+        };
+        let new_mode = match body {
+            BodyMode::Join { target } | BodyMode::Cut { target } if target == on_body => {
+                if distance > 0.0 {
+                    BodyMode::Join { target }
+                } else {
+                    BodyMode::Cut { target }
+                }
+            }
+            _ => return false,
+        };
+        if new_mode == body {
+            return false;
+        }
+        if let Some(FeatureKind::Extrude { body, .. }) = self.feature_mut(fid).map(|f| &mut f.kind)
+        {
+            *body = new_mode;
+        }
+        true
+    }
+
     pub fn body_props_mut(&mut self, b: BodyId) -> &mut BodyProps {
         if let Some(i) = self.bodies.iter().position(|e| e.body == b) {
             return &mut self.bodies[i].props;

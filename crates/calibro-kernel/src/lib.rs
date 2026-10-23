@@ -110,17 +110,21 @@ impl Plane {
         [dot3(d, self.x_axis), dot3(d, self.y_axis)]
     }
 
-    /// Builds an orthonormal plane from an origin and normal.
+    /// Builds an orthonormal plane from an origin and normal. The sketch X axis
+    /// follows world X whenever possible (otherwise world Y), so sketches on faces
+    /// read the same way as on the standard planes: horizontal stays horizontal.
     pub fn from_origin_normal(origin: [f64; 3], normal: [f64; 3]) -> Plane {
         let n = normalize(normal);
-        let helper = if n[2].abs() < 0.9 {
-            [0.0, 0.0, 1.0]
-        } else {
-            [1.0, 0.0, 0.0]
+        let project = |a: [f64; 3]| {
+            let d = dot3(a, n);
+            [a[0] - n[0] * d, a[1] - n[1] * d, a[2] - n[2] * d]
         };
-        let x = normalize(cross(helper, n));
+        let mut x = project([1.0, 0.0, 0.0]);
+        if dot3(x, x) < 0.01 {
+            x = project([0.0, 1.0, 0.0]);
+        }
+        let x = normalize(x);
         let y = cross(n, x);
-        // keep x horizontal-ish for vertical faces: use world Z as "up" when possible
         Plane {
             origin,
             x_axis: x,
@@ -958,6 +962,19 @@ mod tests {
                 Err(e) => eprintln!("{op:?}: {e}"),
             }
         }
+    }
+
+    #[test]
+    fn face_planes_keep_world_x_horizontal() {
+        let top = Plane::from_origin_normal([0.0, 0.0, 5.0], [0.0, 0.0, 1.0]);
+        assert_eq!(top.x_axis, [1.0, 0.0, 0.0]);
+        assert_eq!(top.y_axis, [0.0, 1.0, 0.0]);
+        let front = Plane::from_origin_normal([0.0; 3], [0.0, -1.0, 0.0]);
+        assert_eq!(front.x_axis, [1.0, 0.0, 0.0]);
+        assert!((front.y_axis[2] - 1.0).abs() < 1e-12, "{:?}", front.y_axis); // up is +Z
+        let side = Plane::from_origin_normal([0.0; 3], [1.0, 0.0, 0.0]);
+        assert_eq!(side.x_axis, [0.0, 1.0, 0.0]);
+        assert!((side.normal()[0] - 1.0).abs() < 1e-12);
     }
 
     #[test]

@@ -82,6 +82,7 @@ drawings, and Parasolid/native CAD imports.
 |---|---|---|---|---|---|
 | Extrude (distance, flip, symmetric) | [S1][S5] | Tested | unit + UI | `kernel::extrude`, `recompute.rs` | "Up to face/body" extents: planned |
 | Extrude result modes: new body / join / cut / intersect | [S5] | Tested | unit + UI | `BodyMode` | — |
+| Automatic join ↔ cut when pushing a face sketch into / out of its body (Shapr3D behaviour) | [S5] | Tested | unit + UI (red "cut" handle) | `Document::auto_extrude_mode` | Only when the direction flips, so a mode chosen manually in the inspector is kept |
 | Join/cut from a sketch lying exactly on a face | [S5] | Tested | unit + UI | `extrude_with_overlap` | Workaround for a truck limitation (coplanar faces): tool is extended 0.2 mm into the body when the exact boolean fails |
 | Extrude drag handle in viewport | [S5] adaptive UI | Tested | UI | `viewport.rs handles` | — |
 | Revolve (sketch X/Y axis or a sketch line, any angle) | [S1][S7] | Tested | unit | `kernel::revolve` | — |

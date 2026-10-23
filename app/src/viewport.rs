@@ -788,7 +788,7 @@ impl CalibroApp {
                 profiles,
                 distance,
                 symmetric,
-                ..
+                body,
             } => {
                 let Some(FeatureKind::Sketch { plane, .. }) =
                     self.ed.doc().feature(*sketch).map(|f| &f.kind)
@@ -813,7 +813,13 @@ impl CalibroApp {
                 } else {
                     base + n * *distance
                 };
-                out.push((HandleKind::ExtrudeDistance(fid), tip, n, *distance, ACCENT));
+                // Red while the extrusion removes material, like Shapr3D's cut preview.
+                let col = if matches!(body, BodyMode::Cut { .. }) {
+                    ERR_RED
+                } else {
+                    ACCENT
+                };
+                out.push((HandleKind::ExtrudeDistance(fid), tip, n, *distance, col));
             }
             FeatureKind::Transform {
                 bodies, transform, ..
@@ -878,11 +884,14 @@ impl CalibroApp {
                             v = step;
                         }
                         self.ed.apply_coalesced("Edit Extrude", fid, |d| {
+                            let mut old = v;
                             if let FeatureKind::Extrude { distance, .. } =
                                 &mut d.feature_mut(fid).unwrap().kind
                             {
+                                old = *distance;
                                 *distance = v;
                             }
+                            d.auto_extrude_mode(fid, old);
                         });
                     }
                     HandleKind::Translate(fid, axis) => {
@@ -1436,11 +1445,26 @@ impl CalibroApp {
                     if active || hovered { 9.0 } else { 7.0 },
                     Stroke::new(1.5, Color32::WHITE),
                 );
-                if let HandleKind::ExtrudeDistance(_) = kind {
+                if let HandleKind::ExtrudeDistance(fid) = kind {
+                    let mode = match self.ed.doc().feature(fid).map(|f| &f.kind) {
+                        Some(FeatureKind::Extrude {
+                            body: BodyMode::Cut { .. },
+                            ..
+                        }) => "  cut",
+                        Some(FeatureKind::Extrude {
+                            body: BodyMode::Join { .. },
+                            ..
+                        }) => "  join",
+                        Some(FeatureKind::Extrude {
+                            body: BodyMode::Intersect { .. },
+                            ..
+                        }) => "  intersect",
+                        _ => "",
+                    };
                     label(
                         painter,
                         b + egui::vec2(18.0, -16.0),
-                        &self.fmt_len(value),
+                        &format!("{}{mode}", self.fmt_len(value)),
                         col,
                     );
                 }

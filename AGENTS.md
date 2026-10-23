@@ -39,18 +39,21 @@ then `docs/FEATURE_TRACKER.md` (full scope + status), `docs/TEST_REPORT.md` (evi
 - Useful local tools used so far: `crates/calibro-io/examples/{export_samples,showcase}.rs`.
 
 ## Current state (update every session)
-_Last updated: 2026-10-23._
-- Stage 1 complete (see tracker). Web build verified live in a real browser; Windows/macOS/Linux
-  binaries built on GitHub (manual run, not yet a Release).
-- First CI run failed at Clippy because GitHub used Rust 1.99.1 → fixed locally by pinning 1.97.0.
-- Fixes made on 2026-10-23 but **not yet on GitHub** at the time of writing (packaged as
-  `calibro-update.zip` for the owner, and/or to be pushed once GitHub access works):
-  `rust-toolchain.toml`, the three workflows (pinned toolchain, upload-artifact@v7,
-  action-gh-release@v3), responsive panels + Tools/Panel toggles + title fix in
-  `app/src/{app,panels,viewport}.rs`, `RELEASE_NOTES.md`, docs updates, this file.
+_Last updated: 2026-10-23 (after commit d11b79d)._
+- Stage 1 complete (see tracker).
+- On `main`: toolchain pinned to 1.97.0, responsive layout (panels auto-hide below 900/620 px,
+  *Tools*/*Panel* toggles), window-title fix, release notes, this file.
+- GitHub Actions on d11b79d: **CI green** (fmt, clippy, 58 tests incl. GPU tests on lavapipe,
+  wasm build) and **Pages green**. Live web app re-checked in a real browser (Claude desktop
+  browser pane, WebGPU on Intel): loads, narrow layout correct, no console spam.
+- Not yet done: GitHub Release v0.1.0 (waiting for the owner's OK). Windows/macOS binaries
+  have been built by CI but never launched on real machines.
+- Local working copies used by the 2026-10-22/23 sessions: `/home/claude/calibro` (original,
+  not a git repo) and `/home/claude/calibro-gh` (git clone of GitHub). In a new session just
+  clone the GitHub repo.
 
 ## Next steps (in order)
-1. Get the 2026-10-23 changes onto `main` (push, or the owner uploads them). Confirm CI is green.
+1. ~~Get the 2026-10-23 changes onto `main`~~ (done, CI green).
 2. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
    check that `release.yml` attaches the three archives.
 3. Re-check the live web app after deploy (narrow-screen layout, Tools/Panel toggles).
@@ -64,3 +67,4 @@ _Last updated: 2026-10-23._
 - 2026-10-23 — Owner uploaded to GitHub. Pages deploy and desktop builds succeeded; CI failed
   at Clippy (Rust 1.99). Pinned toolchain, made layout responsive, fixed title spam, wrote
   release notes, added this handoff file.
+- 2026-10-23 (later) — Owner connected GitHub + installed the Claude app; pushed d11b79d; CI and Pages green; verified the live web app.

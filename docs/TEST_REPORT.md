@@ -118,3 +118,35 @@ Not done: opening the files in Blender, Fusion, Maya, 3ds Max or Cinema 4D (not 
 | UI: `examples/modify-tools.calibro` (tray, swept pipe, loft) opened from the command line; Sweep inspector with path selector | ✅ `docs/images/modify-tools.png` |
 | UI: creating Sweep/Loft by clicking regions and the toolbar buttons | ⚠️ Not clicked through on Xvfb (command code reviewed; the features themselves are tested) |
 | Note for testers | xdotool keys/modifiers only reach the window after `xdotool windowfocus` (no window manager on Xvfb) |
+
+
+## 8. Update — 23 Oct 2026 (dark-blue workspace)
+
+The shared egui theme now uses navy panels, a blue accent, larger tool rows with native
+vector icons and keyboard hints, a document header with Save/Export, bounded body/history
+lists, and a start card wired to the existing sketch/open commands. Viewport background,
+grid, selection, sketch states and annotation labels are coordinated with the dark theme.
+Panels also hide when resizing across the existing 900/620 px compact thresholds, while
+remaining manually accessible through the viewport controls. Perspective grid extent is
+bounded relative to camera distance to avoid near-plane line artifacts on software GPUs;
+orthographic grids retain the original extent. No geometry or file-format changes.
+
+Reference: [Shapr3D modeling-space organization](https://support.shapr3d.com/hc/en-us/articles/7873880676508-Shapr3D-modeling-space).
+Calibro uses its own implementation, palette and vector icons.
+
+| Check | Result |
+|---|---|
+| Pinned Rust 1.97.0: `cargo fmt --all --check` | Pass |
+| `cargo clippy --workspace --all-targets -- -D warnings` | Pass |
+| `cargo test --workspace` with Mesa lavapipe | **68 passed**, 0 failed, 1 diagnostic ignored |
+| `cargo build -p calibro` | Pass (native debug build) |
+| GPU background test, run with `--nocapture` to confirm actual rendering | Pass: navy corner RGBA `[22, 35, 53, 255]`, lit solid `[208, 216, 227, 255]` |
+| Native UI, Xvfb + lavapipe, 1280 × 800: open `examples/modify-tools.calibro` | Three bodies render; panel counts, history, properties, tool hints and viewport controls visible. [Screenshot](images/calibro-dark-blue.png) |
+| Native UI: new project, start card, click New sketch | Card visible; click opens plane selection and highlights New sketch. [Start screenshot](images/calibro-start.png) |
+| Native UI: new header Export button | Opens menu with STEP/GLB/OBJ/STL choices; actual export not repeated |
+| Native UI: resize 1280 → 560 px wide | Side panels hide; view controls wrap; project header and start card remain visible. [Screenshot](images/calibro-compact.png) |
+
+Browser/WebAssembly, real hardware GPUs, Windows/macOS, native file chooser completion,
+and full modeling workflows with the new theme were not retested locally in this session.
+The existing CI browser-build job is unchanged. Upstream future-compatibility notices
+for nom/quick-xml remain unchanged.

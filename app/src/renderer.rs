@@ -778,8 +778,8 @@ mod tests {
         let corner = px(&img, 2, 2);
         eprintln!("matte centre {center:?} background corner {corner:?}");
         assert_ne!(center, corner, "the box must cover the centre of the image");
-        // background top is a light grey-blue gradient
-        assert!(corner[0] > 180 && corner[2] > 180, "{corner:?}");
+        // The dark navy background must stay dark and blue, while solids stay lit.
+        assert!(corner[0] < 60 && corner[2] > corner[0] + 15, "{corner:?}");
         // the top face of a light grey box is clearly lit
         assert!(center[0] > 120, "top face too dark: {center:?}");
     }

@@ -177,7 +177,7 @@ fn vs_bg(@builtin(vertex_index) i: u32) -> BgOut {
 
 @fragment
 fn fs_bg(in: BgOut) -> @location(0) vec4<f32> {
-    let top = vec3<f32>(0.93, 0.94, 0.96);
-    let bottom = vec3<f32>(0.78, 0.8, 0.84);
+    let top = vec3<f32>(0.085, 0.135, 0.205);
+    let bottom = vec3<f32>(0.13, 0.20, 0.29);
     return vec4<f32>(mix(bottom, top, in.uv.y), 1.0);
 }

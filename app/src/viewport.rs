@@ -47,7 +47,7 @@ fn label(painter: &egui::Painter, pos: Pos2, text: &str, color: Color32) {
     let r = Align2::CENTER_CENTER
         .anchor_size(pos, galley.size())
         .expand2(egui::vec2(4.0, 1.5));
-    painter.rect_filled(r, 3.0, Color32::from_white_alpha(225));
+    painter.rect_filled(r, 3.0, crate::style::SURFACE);
     painter.galley(r.min + egui::vec2(4.0, 1.5), galley, color);
 }
 
@@ -166,6 +166,63 @@ impl CalibroApp {
                 let painter = ui.painter_at(rect);
                 self.draw_overlays(&painter, rect, &view, pointer);
                 self.viewport_buttons(ui, rect);
+                if self.ed.doc().features.is_empty()
+                    && self.sketch.is_none()
+                    && !self.picking_plane
+                    && self.tool == Tool::Select
+                    && rect.width() > 340.0
+                    && rect.height() > 300.0
+                    && self.renderer.is_some()
+                {
+                    egui::Area::new(egui::Id::unique("workspace_start"))
+                        .fixed_pos(rect.center())
+                        .pivot(Align2::CENTER_CENTER)
+                        .show(ui.ctx(), |ui| {
+                            egui::Frame::popup(ui.style())
+                                .inner_margin(24)
+                                .show(ui, |ui| {
+                                    ui.set_width(260.0);
+                                    ui.vertical_centered(|ui| {
+                                        ui.label(
+                                            egui::RichText::new("Make room for your ideas.")
+                                                .size(20.0)
+                                                .strong(),
+                                        );
+                                        ui.add_space(6.0);
+                                        ui.label(
+                                            egui::RichText::new(
+                                                "Start with a sketch. Build with precision.",
+                                            )
+                                            .color(crate::style::MUTED),
+                                        );
+                                        ui.add_space(16.0);
+                                        if ui
+                                            .add_sized(
+                                                [220.0, 38.0],
+                                                egui::Button::new(
+                                                    egui::RichText::new("New sketch")
+                                                        .color(crate::style::PANEL)
+                                                        .strong(),
+                                                )
+                                                .fill(ACCENT),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.picking_plane = true;
+                                        }
+                                        if ui.button("Open project…").clicked() {
+                                            self.request(Pending::Open);
+                                        }
+                                        ui.add_space(8.0);
+                                        ui.label(
+                                            egui::RichText::new("S  Sketch     •     F  Fit view")
+                                                .size(11.0)
+                                                .color(crate::style::MUTED),
+                                        );
+                                    });
+                                });
+                        });
+                }
                 self.view = Some(view);
             });
     }
@@ -1032,7 +1089,13 @@ impl CalibroApp {
         if self.show_grid {
             let plane = active_plane.unwrap_or(Plane::XY);
             let step = nice_step(cam.distance / 12.0);
-            let n = 30i32;
+            // Keep the perspective grid in front of the camera. Very long lines
+            // crossing its near plane produce clipping artifacts on software GPUs.
+            let n = if cam.orthographic {
+                30
+            } else {
+                ((cam.distance * 0.55 / step).floor() as i32).clamp(4, 30)
+            };
             let center = plane.to_local(cam.target);
             let c = [
                 (center[0] / step).round() * step,
@@ -1043,7 +1106,7 @@ impl CalibroApp {
                 let major = ((c[0] / step).round() as i64 + i as i64) % 10 == 0;
                 let fade = 1.0 - (i.abs() as f32 / n as f32);
                 let a = if major { 0.35 } else { 0.16 } * fade;
-                let col = [0.35, 0.37, 0.42, a];
+                let col = [0.52, 0.65, 0.82, a];
                 let x = c[0] + i as f64 * step;
                 lines.push(LineVertex {
                     pos: f32x3(plane.to_world([x, c[1] - ext])),
@@ -1063,7 +1126,7 @@ impl CalibroApp {
                 });
                 let major = ((c[1] / step).round() as i64 + i as i64) % 10 == 0;
                 let a = if major { 0.35 } else { 0.16 } * fade;
-                let col = [0.35, 0.37, 0.42, a];
+                let col = [0.52, 0.65, 0.82, a];
                 let y = c[1] + i as f64 * step;
                 lines.push(LineVertex {
                     pos: f32x3(plane.to_world([c[0] - ext, y])),
@@ -1124,7 +1187,7 @@ impl CalibroApp {
                     let col = if cons {
                         [0.5, 0.5, 0.55, 0.6]
                     } else {
-                        [0.12, 0.3, 0.75, 0.95]
+                        [0.42, 0.68, 1.0, 0.95]
                     };
                     for w in pts.windows(2) {
                         lines.push(LineVertex {
@@ -1291,7 +1354,7 @@ impl CalibroApp {
             }
             // origin marker
             if let Some(o) = to([0.0, 0.0]) {
-                painter.circle_stroke(o, 4.0, Stroke::new(1.5, Color32::from_gray(60)));
+                painter.circle_stroke(o, 4.0, Stroke::new(1.5, crate::style::MUTED));
             }
             // constraint glyphs and dimension labels
             let mid = |c: u32| -> Option<[f64; 2]> {
@@ -1319,7 +1382,7 @@ impl CalibroApp {
             };
             for (cid, c) in &sk.constraints {
                 let sel = self.sel.sk_constraint == Some(*cid);
-                let col = if sel { ACCENT } else { Color32::from_gray(50) };
+                let col = if sel { ACCENT } else { crate::style::TEXT };
                 let (text, at): (String, Option<[f64; 2]>) = match c {
                     Constraint::Horizontal { line } => ("H".into(), mid(*line)),
                     Constraint::Vertical { line } => ("V".into(), mid(*line)),
@@ -1474,12 +1537,17 @@ impl CalibroApp {
 
         // measurement
         if let Some(a) = self.measure.a.and_then(proj) {
-            painter.circle_filled(a, 4.0, Color32::BLACK);
+            painter.circle_filled(a, 4.0, crate::style::TEXT);
             if let Some(bw) = self.measure.b {
                 if let Some(b) = proj(bw) {
-                    painter.circle_filled(b, 4.0, Color32::BLACK);
+                    painter.circle_filled(b, 4.0, crate::style::TEXT);
                     let d = (bw - self.measure.a.unwrap()).length();
-                    label(painter, a + (b - a) * 0.5, &self.fmt_len(d), Color32::BLACK);
+                    label(
+                        painter,
+                        a + (b - a) * 0.5,
+                        &self.fmt_len(d),
+                        crate::style::TEXT,
+                    );
                 }
             }
         }

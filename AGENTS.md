@@ -39,7 +39,7 @@ then `docs/FEATURE_TRACKER.md` (full scope + status), `docs/TEST_REPORT.md` (evi
 - Useful local tools used so far: `crates/calibro-io/examples/{export_samples,showcase}.rs`.
 
 ## Current state (update every session)
-_Last updated: 2026-10-23 (README preview update)._
+_Last updated: 2026-10-23 (release downloads session)._
 - Stage 1 complete (see tracker).
 - On `main`: toolchain pinned to 1.97.0, responsive layout (panels auto-hide below 900/620 px,
   *Tools*/*Panel* toggles), window-title fix, release notes, this file.
@@ -80,8 +80,10 @@ _Last updated: 2026-10-23 (README preview update)._
 
 - Dark-blue UI refresh merged into `main` via PR #1 (merge commit `d8cff4b4f771a487d0502a06886902d76b449c70`): shared navy theme, blue selection, vector tool icons + shortcut hints, document header with Save/Export, project panel counts, empty-workspace start card, coordinated viewport/grid/annotation and browser loading colors. No document-format or kernel changes. Validated with pinned Rust 1.97: fmt, clippy with warnings denied, all 68 tests (1 diagnostic ignored), native build and Xvfb/lavapipe UI checks. Screenshots and limits are in `docs/TEST_REPORT.md` §8. Panels now hide on resize across compact thresholds; perspective grid bounds avoid software-GPU near-plane artifacts.
 
+- Release-download improvements prepared on `release/visible-downloads`: direct Windows `.exe` plus ZIP; one final upload job waits for Windows/macOS/Linux builds; release body contains exact tag-specific download links and SHA-256 checksums; missing, empty or ambiguous platform packages fail validation. Also handles `release: published`. Linux RPM/portable packaging smoke-checked with the existing native binary; workflow validated with actionlint 1.7.12. No release/tag was created.
+
 ## Next steps (in order)
-1. Collect feedback on the merged dark-blue UI. README now displays `docs/images/calibro-dark-blue.png` on `main`, as requested by the owner; remote README and image target verified.
+1. Review and merge the release-download PR before creating the next version tag on current `main`. Then publish the release and verify all six desktop assets plus checksums after the builds complete. Windows/macOS release builds and remote upload have not been exercised in this session.
 2. ~~Get the 2026-10-23 changes onto `main`~~ (done, CI green).
 3. Get the owner's feedback on the Fedora/Bazzite packages.
 4. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
@@ -112,3 +114,5 @@ _Last updated: 2026-10-23 (README preview update)._
 - 2026-10-23 — Owner explicitly authorized publishing the completed dark-blue UI sources to a separate GitHub branch and opening a pull request. Proceeding with publication; main remains unchanged.
 
 - 2026-10-23 — Confirmed PR #1 was merged. At the owner's request, replaced the old README showcase image with the new dark-blue workspace screenshot on main (commit `b93bb9915cf635ffe1aa9692a51b9c7b34d1d6c7`). Verified the remote Markdown and image blob. Documentation-only update; no application code changed.
+
+- 2026-10-23 — Owner requested visible executables/installers in the upcoming release. Prepared release workflow, linked download table/checksum generator, README and beginner instructions on `release/visible-downloads`. actionlint and functional release-note checks passed; actual local RPM and portable archive built and inspected. No release was published.

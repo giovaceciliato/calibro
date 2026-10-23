@@ -231,9 +231,17 @@ Every push to `main` re-runs **CI** and re-publishes the **web app** automatical
 
 ### Make a downloadable desktop release
 1. On github.com: right side **Releases** → **Create a new release**.
-2. *Choose a tag* → type `v0.1.0` → *Create new tag*. Title: `Calibro 0.1.0`.
+2. *Choose a tag* → enter a new version such as `v0.1.1` → *Create new tag* targeting the latest `main` commit. Use a new tag after the release-workflow changes have been merged.
 3. **Publish release**. The *Release desktop apps* workflow builds Windows, macOS and Linux
-   versions and attaches them to the release (~20 minutes). Anyone can then download them.
+   versions. Once all three builds succeed, it attaches all six desktop downloads and
+   `SHA256SUMS.txt` to **Assets**, and adds direct download links to the release description.
+   Windows gets a directly downloadable `.exe` plus a ZIP; Fedora gets an RPM; Linux gets
+   a portable archive with `install.sh` (adds an app-menu launcher), plus a binary archive;
+   macOS gets an Apple Silicon archive. Source code ZIP/TAR downloads are not the apps.
+   If a build fails, open **Actions → Release desktop apps** and inspect/re-run the failed
+   job. Packages remain available as workflow artifacts, but release upload waits for all
+   platforms. Publishing a release or pushing a `v*` tag triggers the workflow; a manual
+   workflow run on a regular branch only builds downloadable workflow artifacts.
    Note: the apps are not code-signed; Windows SmartScreen/macOS Gatekeeper will warn the
    first time (*More info → Run anyway* on Windows; right-click → *Open* on macOS).
 

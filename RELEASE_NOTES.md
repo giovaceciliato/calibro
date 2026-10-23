@@ -1,4 +1,4 @@
-# Calibro 0.1.0 — first public preview
+# Calibro — desktop preview
 
 The first release of Calibro, an open-source precision 3D CAD application written in Rust.
 **Try it in your browser:** https://giovaceciliato.github.io/calibro/
@@ -18,11 +18,13 @@ The first release of Calibro, an open-source precision 3D CAD application writte
 ## Downloads
 | System | File |
 |---|---|
-| Windows 10/11 (64-bit) | `calibro-windows-x86_64.zip` → unzip → run `calibro.exe` |
+| Windows 10/11 (64-bit) | `calibro-windows-x86_64.exe` → download and run; ZIP also available |
 | macOS (Apple Silicon) | `calibro-macos-arm64.tar.gz` |
 | Fedora 40+ (x86_64) | `calibro-0.1.0-1.x86_64.rpm` → double-click, or `sudo dnf install ./calibro-0.1.0-1.x86_64.rpm` |
 | Any Linux, incl. Bazzite/Silverblue (x86_64) | `calibro-0.1.0-linux-x86_64.tar.gz` → extract → `./install.sh` (installs for your user, adds a menu entry) |
 | Linux, bare binary | `calibro-linux-x86_64.tar.gz` |
+
+## Launching the app
 
 The apps are not code-signed yet:
 - **Windows:** SmartScreen may warn → *More info* → *Run anyway*.

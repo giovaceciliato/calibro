@@ -3,7 +3,7 @@ name: Release desktop apps
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "[0-9]*"]
   release:
     types: [published]
   workflow_dispatch:

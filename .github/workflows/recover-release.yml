@@ -1,0 +1,89 @@
+# Attach already-built packages after a release's final publication step failed.
+name: Recover release downloads
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag (for example 0.1.1 or v0.1.1)
+        required: true
+        type: string
+      run_id:
+        description: Original Release desktop apps run ID containing the three built artifacts
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      SOURCE_RUN_ID: ${{ inputs.run_id }}
+    steps:
+      # Use the repaired publisher from the selected branch, not the old tagged code.
+      - uses: actions/checkout@v6
+      - name: Verify the existing release and original build artifacts
+        id: target
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const tag = process.env.RELEASE_TAG;
+            const runText = process.env.SOURCE_RUN_ID;
+            if (!/^\d+$/.test(runText) || !Number.isSafeInteger(Number(runText))) {
+              throw new Error('Source run ID must be a positive integer');
+            }
+            const run_id = Number(runText);
+            if (run_id <= 0) throw new Error('Source run ID must be positive');
+            const repo = context.repo;
+            const {data: release} = await github.rest.repos.getReleaseByTag({...repo, tag});
+            if (release.draft || release.immutable) {
+              throw new Error('Recovery requires an existing, published, mutable release');
+            }
+            const {data: commit} = await github.rest.repos.getCommit({...repo, ref: `refs/tags/${tag}`});
+            const {data: run} = await github.rest.actions.getWorkflowRun({...repo, run_id});
+            if (run.path.split('@')[0] !== '.github/workflows/release.yml' || run.status !== 'completed') {
+              throw new Error('Source must be a completed Release desktop apps run');
+            }
+            if (run.head_sha !== commit.sha) {
+              throw new Error('Source build commit does not match the release tag');
+            }
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {...repo, run_id});
+            const expected = ['release-assets-calibro-windows-x86_64', 'release-assets-calibro-linux-x86_64', 'release-assets-calibro-macos-arm64'];
+            const packages = artifacts.filter(a => a.name.startsWith('release-assets-'));
+            if (packages.length !== expected.length || expected.some(name => !packages.some(a => a.name === name && !a.expired))) {
+              throw new Error('All three original platform artifacts must exist and be unexpired');
+            }
+            core.setOutput('prerelease', String(release.prerelease));
+            core.info(`Recovering ${tag} from matching build ${run_id} (${commit.sha})`);
+      - uses: actions/download-artifact@v8
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          pattern: release-assets-*
+          path: dist
+          merge-multiple: true
+      - name: Validate downloads and regenerate release links
+        run: |
+          python3 packaging/prepare-release.py \
+            --tag "$RELEASE_TAG" \
+            --repository "$GITHUB_REPOSITORY" \
+            --assets-dir dist \
+            --output release-body.md
+      - name: Attach downloads to the existing release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          prerelease: ${{ steps.target.outputs.prerelease }}
+          body_path: release-body.md
+          files: dist/*
+          fail_on_unmatched_files: true

@@ -240,10 +240,27 @@ Every push to `main` re-runs **CI** and re-publishes the **web app** automatical
    macOS gets an Apple Silicon archive. Source code ZIP/TAR downloads are not the apps.
    If a build fails, open **Actions → Release desktop apps** and inspect/re-run the failed
    job. Packages remain available as workflow artifacts, but release upload waits for all
-   platforms. Publishing a release or pushing a `v*` tag triggers the workflow; a manual
+   platforms. Publishing a release or pushing a numeric/`v*` tag triggers the workflow; a manual
    workflow run on a regular branch only builds downloadable workflow artifacts.
    Note: the apps are not code-signed; Windows SmartScreen/macOS Gatekeeper will warn the
    first time (*More info → Run anyway* on Windows; right-click → *Open* on macOS).
+
+
+### Recover downloads after a failed upload
+If the platform builds succeeded but the final upload failed, you can reuse their packages:
+
+1. Merge the release-recovery fix into `main` first. Re-running an old failed job uses its
+   old workflow/tagged script and does not pick up the fix.
+2. Open **Actions → Recover release downloads → Run workflow**, with branch **main**.
+3. Enter the existing release tag exactly as published (`0.1.1` for the failed release)
+   and the original release workflow run ID (`39946759282` for that run).
+4. Run it. The recovery checks that the release exists, the original build commit matches
+   its tag, and all three unexpired platform artifacts exist. It then attaches the six
+   desktop downloads plus checksums and updates the download links, preserving prerelease
+   status. It does not rebuild the apps or require a new tag/release.
+
+Tags with or without a leading `v` are supported. Numeric and `v*` tag pushes trigger the
+regular build workflow; publishing a GitHub Release also triggers it.
 
 ---
 

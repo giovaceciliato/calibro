@@ -39,7 +39,7 @@ then `docs/FEATURE_TRACKER.md` (full scope + status), `docs/TEST_REPORT.md` (evi
 - Useful local tools used so far: `crates/calibro-io/examples/{export_samples,showcase}.rs`.
 
 ## Current state (update every session)
-_Last updated: 2026-10-23 (sketch circle interaction fix)._
+_Last updated: 2026-10-23 (fillet/chamfer mouse handles)._
 - Stage 1 complete (see tracker).
 - On `main`: toolchain pinned to 1.97.0, responsive layout (panels auto-hide below 900/620 px,
   *Tools*/*Panel* toggles), window-title fix, release notes, this file.
@@ -86,8 +86,10 @@ _Last updated: 2026-10-23 (sketch circle interaction fix)._
 
 - PR #3 was merged into main (`5436754`). New branch `fix/sketch-circles`: reproduced missing circle drag support; preserved two-click circles, added centre-drag-release and exact Radius → Create circle in sketch Properties, and reset unfinished points on toolbar/keyboard tool changes. Four app regression tests plus Xvfb checks; full suite now 72 passed (1 diagnostic ignored). See test report §11 and `docs/images/sketch-circles.png`. No serialization changes.
 
+- Circle fix PR #4 is merged (`d92df1b`). Branch `feat/edge-drag-handles` adds Fillet/Chamfer on-model bidirectional handles, live validated preview, Shift fine adjustment, Escape cancellation, single-step undo/redo and preserved numeric entry. Editor gains checked/coalesced candidates and cancellation that preserves dirty/redo/history state. Thirteen regression tests added; full suite 85 passed (1 diagnostic ignored), fmt/Clippy/native build passed; native example checked for Fillet 3→1 mm + Undo, Chamfer 1→3 mm + Esc. Evidence and screenshots: test report §12. No serialized document changes.
+
 ## Next steps (in order)
-1. Review and merge the sketch-circle interaction PR; then deploy/build a new release for desktop users. Release recovery fix #3 is merged; if recovery is still needed, use **Recover release downloads** with tag `0.1.1` and source run `39946759282` (recovery status not checked in this session).
+1. Review/merge the fillet/chamfer mouse-handle PR and publish a new desktop build if desired. Circle PR #4 is merged. Release recovery fix #3 remains available (tag `0.1.1`, source run `39946759282`); release recovery status was not checked during this modeling-UI session.
 2. ~~Get the 2026-10-23 changes onto `main`~~ (done, CI green).
 3. Get the owner's feedback on the Fedora/Bazzite packages.
 4. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
@@ -124,3 +126,5 @@ _Last updated: 2026-10-23 (sketch circle interaction fix)._
 - 2026-10-23 — Investigated the pasted failure and verified GitHub run/artifact metadata: all Windows/macOS/Linux packages exist; final upload rejected tag `0.1.1` due to the overly strict prefix requirement. Prepared fix, Python regression tests, numeric tag trigger and a provenance-checked recovery workflow on a separate review branch.
 
 - 2026-10-23 — Owner reported sketch circles could not be drawn. Reproduced drag failure (two clicks already worked), added drag creation and exact-radius Properties action, fixed shortcut gesture state, and verified four new app tests plus native drawing/extrusion. Published for review on `fix/sketch-circles`; 72 workspace tests pass.
+
+- 2026-10-23 — Owner requested mouse-slider behavior for fillet/chamfer like Shapr3D. Added on-model handles, validated live preview, fine control, Escape cancellation and one-step undo, with Editor transaction support and thirteen regression tests. Native drag/Undo/Esc checks recorded; prepared on a separate review branch.

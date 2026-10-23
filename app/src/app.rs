@@ -94,6 +94,7 @@ pub struct SketchSession {
 pub enum HandleKind {
     ExtrudeDistance(FeatureId),
     Translate(FeatureId, usize),
+    EdgeAmount(FeatureId),
 }
 
 pub struct HandleDrag {
@@ -102,6 +103,10 @@ pub struct HandleDrag {
     pub start_px: Vec2,
     pub dir_screen: Vec2,
     pub px_per_unit: f32,
+    pub last_px: Vec2,
+    pub raw_value: f64,
+    pub last_attempt: f64,
+    pub error: Option<String>,
 }
 
 pub enum Pending {
@@ -963,6 +968,43 @@ impl CalibroApp {
         self.after_feature_created(id);
     }
 
+    /// Preview edge amounts transactionally: keep the last valid solid on limits/failures.
+    pub fn set_edge_amount(&mut self, fid: FeatureId, value: f64) -> Result<(), String> {
+        if !value.is_finite() || value <= 0.0 {
+            return Err("The size must be positive".into());
+        }
+        let name = match self.ed.doc().feature(fid).map(|f| &f.kind) {
+            Some(FeatureKind::Fillet { .. }) => "Fillet",
+            Some(FeatureKind::Chamfer { .. }) => "Chamfer",
+            _ => return Err("Select a fillet or chamfer feature".into()),
+        };
+        let previously_failed = self.ed.model().failed_features();
+        self.ed.apply_coalesced_checked(
+            &format!("Edit {name}"),
+            fid,
+            |doc| match &mut doc.feature_mut(fid).unwrap().kind {
+                FeatureKind::Fillet { radius, .. } => *radius = value,
+                FeatureKind::Chamfer { distance, .. } => *distance = value,
+                _ => unreachable!(),
+            },
+            |model| {
+                match model.status.get(&fid) {
+                    Some(FeatureStatus::Ok | FeatureStatus::Warning(_)) => {}
+                    Some(FeatureStatus::Failed(reason)) => return Err(reason.clone()),
+                    _ => return Err("The feature is suppressed or rolled back".into()),
+                }
+                for (id, status) in &model.status {
+                    if !previously_failed.contains(id) {
+                        if let FeatureStatus::Failed(reason) = status {
+                            return Err(format!("A later feature would fail: {reason}"));
+                        }
+                    }
+                }
+                Ok(())
+            },
+        )
+    }
+
     pub fn cmd_shell(&mut self) {
         let (body, open_faces) = match self.sel.face {
             Some((b, f)) => {
@@ -1266,8 +1308,13 @@ impl CalibroApp {
     }
 
     pub fn escape(&mut self) {
-        if self.handle.is_some() {
-            self.handle = None;
+        if let Some(handle) = self.handle.take() {
+            if matches!(handle.kind, HandleKind::EdgeAmount(_)) {
+                self.ed.cancel_gesture();
+                self.info("Edge adjustment cancelled");
+            } else {
+                self.ed.end_gesture();
+            }
             return;
         }
         if self.picking_plane {
@@ -1467,7 +1514,15 @@ impl eframe::App for CalibroApp {
         if self.allow_close && self.pending.is_none() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
-        if ctx.input(|i| i.pointer.any_released() || i.key_pressed(egui::Key::Enter)) {
+        if self.handle.is_some()
+            && self.sketch.is_none()
+            && ctx.input(|i| i.key_pressed(egui::Key::Enter))
+        {
+            self.handle = None;
+        }
+        if ctx.input(|i| {
+            (i.pointer.any_released() && self.handle.is_none()) || i.key_pressed(egui::Key::Enter)
+        }) {
             self.ed.end_gesture();
         }
         let title = format!(

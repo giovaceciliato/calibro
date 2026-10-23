@@ -4,7 +4,7 @@ use crate::camera::{self, CameraView};
 use crate::files::{Files, PickedFile, Purpose};
 use crate::renderer::ViewportRenderer;
 use calibro_core::kernel::Plane;
-use calibro_core::sketch::{ConstraintId, CurveId, PointId};
+use calibro_core::sketch::{ConstraintId, CurveId, CurveKind, PointId};
 use calibro_core::*;
 use glam::{DVec3, Vec2};
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ impl Tool {
             Tool::Select => "Click to select · double-click selects a whole body · Ctrl/Shift adds · right-drag orbit · middle/Shift+right-drag pan · wheel zoom",
             Tool::Line => "Line: click points to draw connected lines · click the first point to close · Esc or right-click to stop",
             Tool::Rectangle => "Rectangle: click two opposite corners",
-            Tool::Circle => "Circle: click the centre, then a point on the circle",
+            Tool::Circle => "Circle: click centre then circumference, or drag from centre · set an exact radius in Properties · Esc cancels",
             Tool::Arc => "Arc: click the centre, the start point, then the end (counter-clockwise)",
             Tool::Polygon => "Polygon: click the centre, then a corner",
             Tool::Measure => "Measure: click two points on the model · Esc to reset",
@@ -85,6 +85,8 @@ pub struct SketchSession {
     pub snapped: Option<PointId>,
     pub dragging: Option<PointId>,
     pub polygon_sides: u32,
+    pub circle_dragging: bool,
+    pub circle_radius: f64,
     pub grid_snap: bool,
 }
 
@@ -672,6 +674,8 @@ impl CalibroApp {
             snapped: None,
             dragging: None,
             polygon_sides: 6,
+            circle_dragging: false,
+            circle_radius: 10.0,
             grid_snap: true,
         });
         self.sel = Selection {
@@ -679,6 +683,69 @@ impl CalibroApp {
             ..Default::default()
         };
         self.picking_plane = false;
+    }
+
+    /// Tool changes must not reinterpret a previous tool's unfinished points.
+    pub fn set_tool(&mut self, tool: Tool) {
+        self.tool = tool;
+        if let Some(s) = &mut self.sketch {
+            s.clicks.clear();
+            s.chain_start = None;
+            s.cursor = None;
+            s.snapped = None;
+            s.dragging = None;
+            s.circle_dragging = false;
+        }
+        if tool == Tool::Measure {
+            self.measure = Measure::default();
+        }
+    }
+
+    /// All circle gestures and exact-radius entry share a single undoable command.
+    pub fn create_sketch_circle(
+        &mut self,
+        center: [f64; 2],
+        snapped: Option<PointId>,
+        radius: f64,
+    ) -> bool {
+        let Some(fid) = self.sketch.as_ref().map(|s| s.feature) else {
+            return false;
+        };
+        if !matches!(
+            self.ed.doc().feature(fid).map(|f| &f.kind),
+            Some(FeatureKind::Sketch { .. })
+        ) {
+            return false;
+        }
+        if !radius.is_finite() || radius <= 1e-9 || !center.iter().all(|v| v.is_finite()) {
+            self.error("Circle radius must be greater than zero");
+            return false;
+        }
+        self.ed.apply("Draw circle", |d| {
+            let (_, sk) = d.sketch_mut(fid).unwrap();
+            let existing = snapped.filter(|id| sk.points.contains_key(id));
+            let curve = sk.add_circle(center, radius);
+            if let Some(existing) = existing {
+                if let CurveKind::Circle {
+                    center: temporary, ..
+                } = sk.curves[&curve].kind
+                {
+                    sk.curves.get_mut(&curve).unwrap().kind = CurveKind::Circle {
+                        center: existing,
+                        radius,
+                    };
+                    sk.points.remove(&temporary);
+                }
+            }
+            let _ = calibro_core::sketch::solve(sk);
+        });
+        if let Some(s) = &mut self.sketch {
+            s.clicks.clear();
+            s.chain_start = None;
+            s.circle_dragging = false;
+            s.circle_radius = radius;
+        }
+        true
     }
 
     pub fn finish_sketch(&mut self) {
@@ -1157,27 +1224,26 @@ impl CalibroApp {
             };
         }
         if plain(Key::M) {
-            self.tool = Tool::Measure;
-            self.measure = Measure::default();
+            self.set_tool(Tool::Measure);
         }
         if self.sketch.is_some() {
             if plain(Key::L) {
-                self.tool = Tool::Line;
+                self.set_tool(Tool::Line);
             }
             if plain(Key::R) {
-                self.tool = Tool::Rectangle;
+                self.set_tool(Tool::Rectangle);
             }
             if plain(Key::C) {
-                self.tool = Tool::Circle;
+                self.set_tool(Tool::Circle);
             }
             if plain(Key::A) {
-                self.tool = Tool::Arc;
+                self.set_tool(Tool::Arc);
             }
             if plain(Key::P) {
-                self.tool = Tool::Polygon;
+                self.set_tool(Tool::Polygon);
             }
             if plain(Key::S) {
-                self.tool = Tool::Select;
+                self.set_tool(Tool::Select);
             }
             if plain(Key::Enter) {
                 self.finish_sketch();
@@ -1212,6 +1278,7 @@ impl CalibroApp {
             if !s.clicks.is_empty() {
                 s.clicks.clear();
                 s.chain_start = None;
+                s.circle_dragging = false;
                 return;
             }
             if self.tool != Tool::Select {

@@ -39,7 +39,7 @@ then `docs/FEATURE_TRACKER.md` (full scope + status), `docs/TEST_REPORT.md` (evi
 - Useful local tools used so far: `crates/calibro-io/examples/{export_samples,showcase}.rs`.
 
 ## Current state (update every session)
-_Last updated: 2026-10-23 (release 0.1.1 recovery fix)._
+_Last updated: 2026-10-23 (sketch circle interaction fix)._
 - Stage 1 complete (see tracker).
 - On `main`: toolchain pinned to 1.97.0, responsive layout (panels auto-hide below 900/620 px,
   *Tools*/*Panel* toggles), window-title fix, release notes, this file.
@@ -84,8 +84,10 @@ _Last updated: 2026-10-23 (release 0.1.1 recovery fix)._
 
 - PR #2 merged into main (`857cf0c`). Release `0.1.1` exists as a prerelease, but has no assets: run `39946759282` built all three platforms successfully and failed only because `prepare-release.py` required a `v` prefix. Fix on `fix/release-tag-recovery` accepts the real tag, adds regression tests to CI and a manual recovery workflow that verifies tag/build provenance before attaching the original artifacts. No tag/release changes or recovery upload performed yet.
 
+- PR #3 was merged into main (`5436754`). New branch `fix/sketch-circles`: reproduced missing circle drag support; preserved two-click circles, added centre-drag-release and exact Radius → Create circle in sketch Properties, and reset unfinished points on toolbar/keyboard tool changes. Four app regression tests plus Xvfb checks; full suite now 72 passed (1 diagnostic ignored). See test report §11 and `docs/images/sketch-circles.png`. No serialization changes.
+
 ## Next steps (in order)
-1. Merge the release-tag recovery fix, then run **Recover release downloads** on main with `release_tag=0.1.1`, `run_id=39946759282`; check all seven assets and preserve the existing prerelease. Re-running the old failed job alone will still use the old script.
+1. Review and merge the sketch-circle interaction PR; then deploy/build a new release for desktop users. Release recovery fix #3 is merged; if recovery is still needed, use **Recover release downloads** with tag `0.1.1` and source run `39946759282` (recovery status not checked in this session).
 2. ~~Get the 2026-10-23 changes onto `main`~~ (done, CI green).
 3. Get the owner's feedback on the Fedora/Bazzite packages.
 4. With the owner's OK: create release `v0.1.0` (tag on `main`, body = `RELEASE_NOTES.md`);
@@ -120,3 +122,5 @@ _Last updated: 2026-10-23 (release 0.1.1 recovery fix)._
 - 2026-10-23 — Owner requested visible executables/installers in the upcoming release. Prepared release workflow, linked download table/checksum generator, README and beginner instructions on `release/visible-downloads`. actionlint and functional release-note checks passed; actual local RPM and portable archive built and inspected. No release was published.
 
 - 2026-10-23 — Investigated the pasted failure and verified GitHub run/artifact metadata: all Windows/macOS/Linux packages exist; final upload rejected tag `0.1.1` due to the overly strict prefix requirement. Prepared fix, Python regression tests, numeric tag trigger and a provenance-checked recovery workflow on a separate review branch.
+
+- 2026-10-23 — Owner reported sketch circles could not be drawn. Reproduced drag failure (two clicks already worked), added drag creation and exact-radius Properties action, fixed shortcut gesture state, and verified four new app tests plus native drawing/extrusion. Published for review on `fix/sketch-circles`; 72 workspace tests pass.

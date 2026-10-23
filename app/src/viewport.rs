@@ -60,6 +60,46 @@ fn arc_points(center: [f64; 2], r: f64, a0: f64, sweep: f64, n: usize) -> Vec<[f
         .collect()
 }
 
+/// Map a pointer (including a drag's press origin) to the same snapped sketch plane.
+fn sketch_cursor(
+    view: &CameraView,
+    plane: &Plane,
+    sk: &Sketch,
+    pointer: Vec2,
+    grid_snap: bool,
+) -> Option<([f64; 2], Option<PointId>)> {
+    let hit = picking::ray_plane(
+        &view.ray(pointer),
+        DVec3::from(plane.origin),
+        DVec3::from(plane.normal()),
+    )?;
+    let mut pos = plane.to_local(hit.to_array());
+    let screen = |q| view.project(DVec3::from(plane.to_world(q)));
+    let mut snapped = None;
+    let mut best = SNAP_PX;
+    for (id, point) in &sk.points {
+        if let Some(p) = screen(point.xy()) {
+            let distance = (p - pointer).length();
+            if distance < best {
+                best = distance;
+                snapped = Some(*id);
+            }
+        }
+    }
+    if let Some(id) = snapped {
+        pos = sk.points[&id].xy();
+    } else if screen([0.0, 0.0]).is_some_and(|p| (p - pointer).length() < SNAP_PX) {
+        pos = [0.0, 0.0];
+    } else if grid_snap {
+        let step = nice_step(view.pixel_size_at(hit) * 12.0);
+        pos = [
+            (pos[0] / step).round() * step,
+            (pos[1] / step).round() * step,
+        ];
+    }
+    Some((pos, snapped))
+}
+
 /// Polylines (in sketch coordinates) for every curve: (curve id, construction, points).
 fn sketch_polylines(sk: &Sketch) -> Vec<(u32, bool, Vec<[f64; 2]>)> {
     let mut out = Vec::new();
@@ -100,6 +140,7 @@ impl CalibroApp {
                 let view = CameraView::new(&self.ed.doc().camera, size);
                 let pointer = resp
                     .hover_pos()
+                    .or_else(|| resp.interact_pointer_pos())
                     .map(|p| Vec2::new(p.x - rect.min.x, p.y - rect.min.y));
 
                 // interaction (may change the document)
@@ -540,42 +581,27 @@ impl CalibroApp {
             }
             return;
         };
-        let ray = view.ray(p);
-        let Some(hit) =
-            picking::ray_plane(&ray, DVec3::from(plane.origin), DVec3::from(plane.normal()))
-        else {
+        let tool = self.tool;
+        let grid_snap = self.sketch.as_ref().unwrap().grid_snap && tool.is_sketch_tool();
+        let Some((mut pos, snapped)) = sketch_cursor(view, &plane, &sk, p, grid_snap) else {
             return;
         };
-        let mut pos = plane.to_local(hit.to_array());
-        let screen = |q: [f64; 2]| view.project(DVec3::from(plane.to_world(q)));
-
-        // snapping to existing points, then the origin, then the grid
-        let mut snapped: Option<PointId> = None;
-        let mut best = SNAP_PX;
-        for (id, pt) in &sk.points {
-            if let Some(s) = screen(pt.xy()) {
-                let d = (s - p).length();
-                if d < best {
-                    best = d;
-                    snapped = Some(*id);
+        let s = self.sketch.as_mut().unwrap();
+        if tool == Tool::Circle && resp.drag_started_by(egui::PointerButton::Primary) {
+            if s.clicks.is_empty() {
+                if let Some(origin) = ui.input(|i| i.pointer.press_origin()) {
+                    let origin = Vec2::new(origin.x - resp.rect.min.x, origin.y - resp.rect.min.y);
+                    if let Some(center) = sketch_cursor(view, &plane, &sk, origin, grid_snap) {
+                        s.clicks.push(center);
+                    }
                 }
             }
+            s.circle_dragging = !s.clicks.is_empty();
         }
-        let tool = self.tool;
-        let s = self.sketch.as_mut().unwrap();
-        if let Some(id) = snapped {
-            pos = sk.points[&id].xy();
-        } else if screen([0.0, 0.0])
-            .map(|o| (o - p).length() < SNAP_PX)
-            .unwrap_or(false)
-        {
-            pos = [0.0, 0.0];
-        } else if s.grid_snap && tool.is_sketch_tool() {
-            let step = nice_step(view.pixel_size_at(hit) * 12.0);
-            pos = [
-                (pos[0] / step).round() * step,
-                (pos[1] / step).round() * step,
-            ];
+        if tool == Tool::Circle {
+            if let Some((center, _)) = s.clicks.first() {
+                s.circle_radius = (pos[0] - center[0]).hypot(pos[1] - center[1]);
+            }
         }
         // horizontal / vertical inference for lines
         let mut infer_h = false;
@@ -602,6 +628,19 @@ impl CalibroApp {
             }
             s.clicks.clear();
             s.chain_start = None;
+            s.circle_dragging = false;
+            return;
+        }
+
+        if tool == Tool::Circle
+            && s.circle_dragging
+            && resp.drag_stopped_by(egui::PointerButton::Primary)
+        {
+            s.circle_dragging = false;
+            if let Some((center, point)) = s.clicks.first().copied() {
+                let radius = s.circle_radius;
+                self.create_sketch_circle(center, point, radius);
+            }
             return;
         }
 
@@ -649,12 +688,20 @@ impl CalibroApp {
                     s.chain_start = snapped;
                 }
             }
-            Tool::Rectangle | Tool::Circle | Tool::Polygon => {
+            Tool::Circle => {
+                if let Some((center, point)) = s.clicks.first().copied() {
+                    let radius = (pos[0] - center[0]).hypot(pos[1] - center[1]);
+                    self.create_sketch_circle(center, point, radius);
+                } else {
+                    s.clicks.push(click);
+                }
+            }
+            Tool::Rectangle | Tool::Polygon => {
                 if s.clicks.is_empty() {
                     s.clicks.push(click);
                     return;
                 }
-                let (c0, c0_id) = s.clicks[0];
+                let (c0, _) = s.clicks[0];
                 s.clicks.clear();
                 let r = (pos[0] - c0[0]).hypot(pos[1] - c0[1]);
                 if r < 1e-9 {
@@ -662,7 +709,6 @@ impl CalibroApp {
                 }
                 let label = match tool {
                     Tool::Rectangle => "Draw rectangle",
-                    Tool::Circle => "Draw circle",
                     _ => "Draw polygon",
                 };
                 self.ed.apply(label, |d| {
@@ -670,23 +716,6 @@ impl CalibroApp {
                     match tool {
                         Tool::Rectangle => {
                             sk.add_rectangle(c0, pos);
-                        }
-                        Tool::Circle => {
-                            let c = sk.add_circle(c0, r);
-                            if let Some(existing) = c0_id {
-                                // reuse the snapped point as the centre
-                                if let Some(CurveKind::Circle { center, .. }) =
-                                    sk.curves.get(&c).map(|c| c.kind)
-                                {
-                                    if let Some(cv) = sk.curves.get_mut(&c) {
-                                        cv.kind = CurveKind::Circle {
-                                            center: existing,
-                                            radius: r,
-                                        };
-                                    }
-                                    sk.points.remove(&center);
-                                }
-                            }
                         }
                         _ => {
                             sk.add_polygon(c0, r, sides as usize);
@@ -1668,4 +1697,182 @@ impl CalibroApp {
 
 fn f32x3(p: [f64; 3]) -> [f32; 3] {
     [p[0] as f32, p[1] as f32, p[2] as f32]
+}
+
+#[cfg(test)]
+mod circle_tests {
+    use super::*;
+    use eframe::App;
+
+    struct Harness {
+        app: CalibroApp,
+        ctx: egui::Context,
+        frame: eframe::Frame,
+        time: f64,
+    }
+
+    impl Harness {
+        fn new(plane: Plane) -> Self {
+            let ctx = egui::Context::default();
+            let cc = eframe::CreationContext::_new_kittest(ctx.clone());
+            let mut app = CalibroApp::new(&cc);
+            app.start_sketch(plane, None);
+            app.sketch.as_mut().unwrap().grid_snap = false;
+            app.set_tool(Tool::Circle);
+            let mut h = Self {
+                app,
+                ctx,
+                frame: eframe::Frame::_new_kittest(),
+                time: 0.0,
+            };
+            h.input(vec![]);
+            h.input(vec![]);
+            h
+        }
+
+        fn input(&mut self, events: Vec<egui::Event>) {
+            self.time += 0.05;
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    Pos2::ZERO,
+                    egui::vec2(1280.0, 800.0),
+                )),
+                time: Some(self.time),
+                events,
+                ..Default::default()
+            };
+            let mut output = self.ctx.run_ui(raw, |ui| self.app.ui(ui, &mut self.frame));
+            // This harness checks input/model state without a texture backend.
+            output.textures_delta.clear();
+        }
+
+        fn point(&self, xy: [f64; 2]) -> Pos2 {
+            let (_, plane, _) = self.app.active_sketch().unwrap();
+            to_pos(
+                self.app.viewport_rect,
+                self.app
+                    .view
+                    .as_ref()
+                    .unwrap()
+                    .project(DVec3::from(plane.to_world(xy)))
+                    .unwrap(),
+            )
+        }
+
+        fn button(&mut self, pos: Pos2, pressed: bool) {
+            self.input(vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]);
+        }
+
+        fn click(&mut self, xy: [f64; 2]) {
+            let p = self.point(xy);
+            self.button(p, true);
+            self.button(p, false);
+        }
+
+        fn key(&mut self, key: egui::Key) {
+            self.input(vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            self.input(vec![egui::Event::Key {
+                key,
+                physical_key: Some(key),
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+
+        fn circle(&self) -> ([f64; 2], f64) {
+            let (_, _, sk) = self.app.active_sketch().unwrap();
+            assert_eq!(sk.curves.len(), 1);
+            let CurveKind::Circle { center, radius } = sk.curves.values().next().unwrap().kind
+            else {
+                panic!("expected circle")
+            };
+            (sk.points[&center].xy(), radius)
+        }
+    }
+
+    #[test]
+    fn circle_two_clicks_and_single_undo() {
+        let mut h = Harness::new(Plane::XY);
+        h.click([0.0, 0.0]);
+        h.click([20.0, 0.0]);
+        let (center, radius) = h.circle();
+        assert_eq!(center, [0.0, 0.0]);
+        assert!((radius - 20.0).abs() < 1e-4);
+        let fid = h.app.sketch.as_ref().unwrap().feature;
+        assert_eq!(h.app.ed.model().profiles[&fid].len(), 1);
+        assert!(h.app.ed.undo());
+        assert!(h.app.active_sketch().unwrap().2.curves.is_empty());
+        assert!(h.app.ed.redo());
+        assert!((h.circle().1 - 20.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn circle_drag_uses_press_origin_and_releases_once_on_both_planes() {
+        for plane in [Plane::XY, Plane::XZ] {
+            let mut h = Harness::new(plane);
+            let start = h.point([5.0, 5.0]);
+            let end = h.point([25.0, 5.0]);
+            h.button(start, true);
+            h.input(vec![egui::Event::PointerMoved(end)]);
+            assert!(h.app.sketch.as_ref().unwrap().circle_dragging);
+            h.button(end, false);
+            h.input(vec![]);
+            let (center, radius) = h.circle();
+            assert!((center[0] - 5.0).abs() < 1e-4 && (center[1] - 5.0).abs() < 1e-4);
+            assert!((radius - 20.0).abs() < 1e-4);
+            assert!(h.app.sketch.as_ref().unwrap().clicks.is_empty());
+        }
+    }
+
+    #[test]
+    fn circle_shortcut_clears_unfinished_line_and_escape_cancels_drag() {
+        let mut h = Harness::new(Plane::XY);
+        h.app.set_tool(Tool::Line);
+        h.click([-20.0, 0.0]);
+        assert_eq!(h.app.sketch.as_ref().unwrap().clicks.len(), 1);
+        h.key(egui::Key::C);
+        assert_eq!(h.app.tool, Tool::Circle);
+        assert!(h.app.sketch.as_ref().unwrap().clicks.is_empty());
+        let start = h.point([0.0, 0.0]);
+        let end = h.point([20.0, 0.0]);
+        h.button(start, true);
+        h.input(vec![egui::Event::PointerMoved(end)]);
+        h.key(egui::Key::Escape);
+        h.button(end, false);
+        assert!(h.app.active_sketch().unwrap().2.curves.is_empty());
+        assert!(!h.app.sketch.as_ref().unwrap().circle_dragging);
+    }
+
+    #[test]
+    fn circle_exact_radius_reuses_snapped_center_and_rejects_invalid_values() {
+        let mut h = Harness::new(Plane::XY);
+        let fid = h.app.sketch.as_ref().unwrap().feature;
+        let point = h.app.ed.apply("Add point", |d| {
+            d.sketch_mut(fid).unwrap().1.add_point(10.0, 5.0)
+        });
+        for radius in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(!h.app.create_sketch_circle([10.0, 5.0], Some(point), radius));
+        }
+        assert!(h.app.active_sketch().unwrap().2.curves.is_empty());
+        assert!(h.app.create_sketch_circle([10.0, 5.0], Some(point), 12.5));
+        let (_, _, sketch) = h.app.active_sketch().unwrap();
+        assert_eq!(sketch.points.len(), 1);
+        assert_eq!(h.circle(), ([10.0, 5.0], 12.5));
+        assert_eq!(h.app.ed.model().profiles[&fid].len(), 1);
+    }
 }

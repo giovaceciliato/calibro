@@ -52,7 +52,7 @@ drawings, and Parasolid/native CAD imports.
 | Sketch on a planar face of a body | [S1] | Tested | UI (sketch on top face) | `viewport.rs` plane pick, `panels.rs` | Plane is captured when the sketch is made; it does not follow later edits of that face (topological naming). Next: store face reference + re-resolve. |
 | Line (chained polyline, closes on first point) | [S2] | Tested | UI | `viewport.rs` `sketch_input` | — |
 | Rectangle (with automatic H/V constraints) | [S2] | Tested | unit + UI | `calibro-sketch/model.rs` | Centre-rectangle variant: planned |
-| Circle | [S2] | Tested | unit + UI | | — |
+| Circle | [S2] | Tested | four app input/command tests + native UI, report §11 | `create_sketch_circle`, `viewport.rs circle_tests` | Centre + circumference clicks, centre-drag-release, exact radius in Properties; undo/redo and cancellation checked |
 | Arc (centre, start, end) | [S2] | Tested | unit (arc regions + extruded slot) | | 3-point and tangent arcs: planned |
 | Regular polygon | [S2] | Tested | unit (hexagon area exact) | | — |
 | Spline | [S2] | Planned | — | | Needs B-spline entity + solver handles; truck supports B-splines |

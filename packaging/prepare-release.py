@@ -11,8 +11,8 @@ from urllib.parse import quote
 def prepare(tag: str, repository: str, assets: Path, template: Path) -> str:
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repository):
         raise ValueError("Repository must be owner/name")
-    if not tag.startswith("v") or not re.fullmatch(r"[\w.+/-]+", tag):
-        raise ValueError("Expected a version tag starting with v")
+    if not tag or tag.isspace():
+        raise ValueError("Expected a nonempty Git tag")
     choices = [
         ("Windows 10/11 · executable", "calibro-windows-x86_64.exe", "Download and run the .exe"),
         ("Windows 10/11 · ZIP", "calibro-windows-x86_64.zip", "Extract, then run calibro.exe"),

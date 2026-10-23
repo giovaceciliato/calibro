@@ -24,6 +24,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Software GPU for rendering tests
         run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers
+      - name: Release packaging regression tests
+        run: python3 -m unittest discover -s packaging -p 'test_*.py'
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Clippy

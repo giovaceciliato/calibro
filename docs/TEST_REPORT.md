@@ -168,3 +168,21 @@ for nom/quick-xml remain unchanged.
   performed. The final release job awaits all three builds and validates the download set.
 - Merge the workflow changes before creating the next tag on current main. A regular-branch
   manual run keeps packages as workflow artifacts without publishing a release.
+
+
+## 10. Update — 23 Oct 2026 (release tag 0.1.1 recovery)
+
+GitHub run `39946759282` built Windows, macOS and Linux successfully for commit
+`857cf0cbba960a4bfcd0bf158467dee0d28d8814`. Three release-assets artifacts are present
+and unexpired. The final job failed before upload because the helper rejected `0.1.1`
+without a `v` prefix. The release exists as a mutable prerelease with zero assets.
+
+- Removed the unnecessary prefix restriction; added four unittest cases covering `0.1.1`,
+  `v0.1.1`, beta/slash tags, empty tags, exact download URLs/checksums and incomplete inputs.
+  Added these regression tests to CI. All four pass locally.
+- actionlint 1.7.12 passes for CI, release and the new recovery workflow.
+- Recovery guard script smoke-checked using mocked API responses: matching original build
+  accepted and prerelease flag preserved; wrong commit/workflow, incomplete run, missing
+  or expired packages, draft/immutable release and invalid run IDs rejected.
+- Recovery is manual, checks the tag matches the build commit, reuses the original artifacts,
+  and does not require rebuilding or moving the existing tag. Remote recovery not run yet.

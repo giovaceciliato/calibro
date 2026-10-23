@@ -58,6 +58,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
+          name: Calibro ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
           files: |
             ${{ matrix.name }}.zip
             ${{ matrix.name }}.tar.gz

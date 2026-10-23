@@ -31,6 +31,9 @@ pub fn apply(ctx: &egui::Context) {
         v.window_fill = SURFACE;
         v.extreme_bg_color = Color32::from_rgb(12, 22, 37);
         v.faint_bg_color = SURFACE;
+        // the slider rail uses the inactive widget fill (same as the window): show the
+        // filled part in the selection colour so the rail stays visible
+        v.slider_trailing_fill = true;
         v.hyperlink_color = ACCENT;
         v.window_stroke = Stroke::new(1.0, BORDER);
         v.selection.bg_fill = Color32::from_rgb(33, 77, 121);
@@ -83,7 +86,7 @@ fn tool_icon(p: &egui::Painter, center: egui::Pos2, label: &str, color: Color32)
         "Circle" | "Sphere" | "Circular pattern" => {
             p.circle_stroke(center, 6.0, s);
         }
-        "Arc" | "Revolve" | "Fillet" => {
+        "Arc" | "3-point arc" | "Revolve" | "Fillet" => {
             p.add(egui::Shape::line(
                 vec![
                     pt(-6.0, 6.0),
@@ -105,6 +108,13 @@ fn tool_icon(p: &egui::Painter, center: egui::Pos2, label: &str, color: Color32)
             line(pt(-4.0, -3.0), pt(0.0, -7.0));
             line(pt(4.0, -3.0), pt(0.0, -7.0));
             line(pt(-6.0, 7.0), pt(6.0, 7.0));
+        }
+        "Trim" => {
+            // scissors: two blades and two rings
+            line(pt(-6.0, -6.0), pt(5.0, 3.0));
+            line(pt(-6.0, 6.0), pt(5.0, -3.0));
+            p.circle_stroke(pt(5.5, 5.0), 2.2, s);
+            p.circle_stroke(pt(5.5, -5.0), 2.2, s);
         }
         "Union" | "Subtract" | "Intersect" => {
             p.rect_stroke(
@@ -169,6 +179,7 @@ pub fn tool_button(ui: &mut egui::Ui, selected: bool, label: &str, tip: &str) ->
         "Circle" => "C",
         "Arc" => "A",
         "Polygon" => "P",
+        "Trim" => "T",
         _ => "",
     };
     ui.painter().text(

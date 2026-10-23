@@ -60,6 +60,63 @@ pub struct Model {
     pub status: BTreeMap<FeatureId, FeatureStatus>,
     pub sketch_status: BTreeMap<FeatureId, SolveStatus>,
     pub profiles: BTreeMap<FeatureId, Vec<Profile>>,
+    /// Effective plane of each evaluated sketch (differs from the stored plane when the
+    /// sketch is attached to a face that moved).
+    pub sketch_planes: BTreeMap<FeatureId, kernel::Plane>,
+}
+
+impl Model {
+    /// The plane a sketch actually lies on after recompute (falls back to the stored one).
+    pub fn sketch_plane(&self, doc: &Document, id: FeatureId) -> Option<kernel::Plane> {
+        if let Some(p) = self.sketch_planes.get(&id) {
+            return Some(*p);
+        }
+        match &doc.feature(id)?.kind {
+            FeatureKind::Sketch { plane, .. } => Some(*plane),
+            _ => None,
+        }
+    }
+}
+
+/// Finds the current offset (`normal · p`) of the face a sketch is attached to: among the
+/// planar faces of `mesh` with the same outward normal, the one closest to the remembered
+/// plane, ties broken by distance to the remembered anchor point.
+pub fn resolve_face_attach(mesh: &kernel::BodyMesh, a: &FaceAttach) -> Option<f64> {
+    let dot = |x: [f64; 3], y: [f64; 3]| x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    let mut best: Option<(f64, f64)> = None;
+    for (fi, pl) in mesh.face_planes.iter().enumerate() {
+        let Some(pl) = pl else { continue };
+        if dot(pl.normal(), a.normal) < 1.0 - 1e-9 {
+            continue;
+        }
+        let off = dot(a.normal, pl.origin);
+        // centroid of the face's triangles
+        let (mut c, mut k) = ([0.0f64; 3], 0.0);
+        for t in mesh.indices.chunks_exact(3) {
+            if mesh.face_ids[t[0] as usize] as usize == fi {
+                for &i in t {
+                    let p = mesh.positions[i as usize];
+                    for j in 0..3 {
+                        c[j] += p[j] as f64;
+                    }
+                    k += 1.0;
+                }
+            }
+        }
+        let lateral = if k > 0.0 {
+            let d = [0, 1, 2].map(|j| c[j] / k - a.anchor[j]);
+            let along = dot(d, a.normal);
+            let l = [0, 1, 2].map(|j| d[j] - a.normal[j] * along);
+            dot(l, l).sqrt()
+        } else {
+            0.0
+        };
+        let score = (off - a.offset).abs() + 1e-3 * lateral;
+        if best.map(|b| score < b.0).unwrap_or(true) {
+            best = Some((score, off));
+        }
+    }
+    best.map(|b| b.1)
 }
 
 impl Model {
@@ -207,6 +264,7 @@ impl Engine {
         let FeatureKind::Sketch { plane, .. } = &f.kind else {
             return Err("the referenced feature is not a sketch".into());
         };
+        let plane = model.sketch_planes.get(&sketch_id).unwrap_or(plane);
         let all = model.profiles.get(&sketch_id).ok_or_else(|| {
             "the referenced sketch comes later in the history or is suppressed".to_string()
         })?;
@@ -331,6 +389,9 @@ impl Engine {
                     input_keys.push(hash_of(
                         &serde_json::to_string(&df.kind).unwrap_or_default(),
                     ));
+                    if let Some(p) = model.sketch_planes.get(&dep) {
+                        input_keys.push(hash_of(&serde_json::to_string(p).unwrap_or_default()));
+                    }
                 }
             }
         }
@@ -338,17 +399,45 @@ impl Engine {
         let key = hash_of(&(def.as_str(), &input_keys, f.id));
 
         match &f.kind {
-            FeatureKind::Sketch { sketch, .. } => {
+            FeatureKind::Sketch {
+                sketch,
+                plane,
+                on_body,
+                attach,
+            } => {
                 let mut s = sketch.clone();
                 let report = calibro_sketch::solve(&mut s).map_err(|e| e.to_string())?;
                 let profiles = find_profiles(&s);
                 model.profiles.insert(f.id, profiles);
                 let status = report.status.clone();
                 model.sketch_status.insert(f.id, report.status);
+                // follow the face this sketch is attached to
+                let mut lost_face = false;
+                let mut eff = *plane;
+                if let (Some(b), Some(a)) = (on_body, attach) {
+                    match model
+                        .bodies
+                        .get(b)
+                        .and_then(|body| resolve_face_attach(&body.mesh, a))
+                    {
+                        Some(off) => {
+                            let delta = off - a.offset;
+                            for j in 0..3 {
+                                eff.origin[j] += a.normal[j] * delta;
+                            }
+                        }
+                        None => lost_face = true,
+                    }
+                }
+                model.sketch_planes.insert(f.id, eff);
                 Ok(match status {
                     SolveStatus::Conflicting { .. } => {
                         FeatureStatus::Warning("conflicting constraints".into())
                     }
+                    _ if lost_face => FeatureStatus::Warning(
+                        "the face this sketch was drawn on no longer exists; the sketch stays where it was"
+                            .into(),
+                    ),
                     _ => FeatureStatus::Ok,
                 })
             }
@@ -696,7 +785,7 @@ impl Engine {
             } => {
                 let solids = self.cached(key, used_solid_keys, || {
                     let (plane, profs) = Self::sketch_profiles(doc, model, *sketch, profiles)?;
-                    let segs = sketch_path(doc, *path)?;
+                    let segs = sketch_path_on(doc, *path, model.sketch_planes.get(path).copied())?;
                     profs
                         .iter()
                         .map(|p| {
@@ -892,6 +981,15 @@ pub fn sketch_path(
     doc: &Document,
     sketch_id: FeatureId,
 ) -> Result<Vec<kernel::PathSegment>, String> {
+    sketch_path_on(doc, sketch_id, None)
+}
+
+/// Like [`sketch_path`], with the effective sketch plane from a recompute.
+pub fn sketch_path_on(
+    doc: &Document,
+    sketch_id: FeatureId,
+    plane_override: Option<kernel::Plane>,
+) -> Result<Vec<kernel::PathSegment>, String> {
     use calibro_sketch::CurveKind;
     let f = doc
         .feature(sketch_id)
@@ -899,6 +997,7 @@ pub fn sketch_path(
     let FeatureKind::Sketch { plane, sketch, .. } = &f.kind else {
         return Err("the path must be a sketch".into());
     };
+    let plane = &plane_override.unwrap_or(*plane);
     let mut s = sketch.clone();
     let _ = calibro_sketch::solve(&mut s);
     let w = |p: [f64; 2]| plane.to_world(p);

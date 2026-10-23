@@ -16,7 +16,9 @@
 use calibro_sketch::{Profile, Segment};
 
 mod ops;
+mod section;
 pub use ops::{chamfer, fillet, loft, shell, sweep, PathSegment};
+pub use section::{section_cap, section_loops};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use truck_meshalgo::prelude::*;
@@ -247,6 +249,20 @@ pub fn profile_fill(plane: &Plane, profile: &Profile, tol: f64) -> Result<Vec<[f
     Ok(out)
 }
 
+/// Checks an imported solid (it must tessellate to a closed, non-empty mesh) and orients
+/// it outward.
+pub fn validate_imported(solid: Solid) -> Result<Solid> {
+    let s = orient_outward(solid);
+    let tol = default_tolerance(&s);
+    let m = tessellate_unguarded(&s, tol);
+    if m.indices.is_empty() || m.volume() <= 0.0 {
+        return Err(KernelError::InvalidParameter(
+            "the imported shape could not be meshed as a closed solid".into(),
+        ));
+    }
+    Ok(s)
+}
+
 /// Ensures the solid's boundary points outward (positive volume).
 fn orient_outward(mut solid: Solid) -> Solid {
     if signed_volume(&solid) < 0.0 {
@@ -435,13 +451,46 @@ pub fn make_sphere(center: [f64; 3], radius: f64) -> Result<Solid> {
             "sphere radius must be positive".into(),
         ));
     }
-    let c = p3(center);
-    let top = builder::vertex(c + Vector3::new(0.0, 0.0, radius));
-    let bottom = builder::vertex(c - Vector3::new(0.0, 0.0, radius));
-    let arc = builder::circle_arc(&top, &bottom, c + Vector3::new(radius, 0.0, 0.0));
+    // Built at the origin and moved: revolving an arc whose sphere contains the origin
+    // directly gave a wrong mesh (measured: +30 % volume for centre (5,5,5), r = 10).
+    let o = Point3::new(0.0, 0.0, 0.0);
+    let top = builder::vertex(o + Vector3::new(0.0, 0.0, radius));
+    let bottom = builder::vertex(o - Vector3::new(0.0, 0.0, radius));
+    let arc = builder::circle_arc(&top, &bottom, o + Vector3::new(radius, 0.0, 0.0));
     let wire: Wire = vec![arc].into();
     let shell = builder::cone(&wire, Vector3::unit_z(), Rad(std::f64::consts::TAU));
-    Ok(orient_outward(Solid::new(vec![shell])))
+    let solid = orient_outward(Solid::new(vec![shell]));
+    Ok(builder::translated(&solid, Vector3::from(center)))
+}
+
+/// Full torus around `axis` through `center`; `e1` is a unit vector perpendicular to the
+/// axis giving where the tube's seam starts.
+pub fn make_torus(
+    center: [f64; 3],
+    axis: [f64; 3],
+    e1: [f64; 3],
+    major: f64,
+    minor: f64,
+) -> Result<Solid> {
+    if minor <= 0.0 || major <= minor {
+        return Err(KernelError::InvalidParameter(
+            "a torus needs 0 < tube radius < ring radius".into(),
+        ));
+    }
+    // built around the origin and moved there afterwards (see make_sphere)
+    let (c, a, x) = (
+        Point3::new(0.0, 0.0, 0.0),
+        Vector3::from(axis).normalize(),
+        Vector3::from(e1).normalize(),
+    );
+    let tube_center = c + x * major;
+    let v = builder::vertex(tube_center + x * minor);
+    // the tube circle lies in the plane spanned by x and the axis
+    let tube_normal = a.cross(x);
+    let circle = builder::rsweep(&v, tube_center, tube_normal, Rad(std::f64::consts::TAU));
+    let shell = builder::rsweep(&circle, c, a, Rad(std::f64::consts::TAU));
+    let solid = orient_outward(Solid::new(vec![shell]));
+    Ok(builder::translated(&solid, Vector3::from(center)))
 }
 
 // ---------------------------------------------------------------------------
@@ -715,18 +764,33 @@ fn tessellate_unguarded(solid: &Solid, tol: f64) -> BodyMesh {
         }
     }
     weld(&mut out);
+    // Which faces meet at each edge (to hide smooth edges such as cylinder seams).
+    let mut edge_faces: std::collections::HashMap<_, Vec<u32>> = std::collections::HashMap::new();
+    for (fid, face) in meshed.face_iter().enumerate() {
+        for w in face.boundaries() {
+            for e in w.edge_iter() {
+                let list = edge_faces.entry(e.id()).or_default();
+                if !list.contains(&(fid as u32)) {
+                    list.push(fid as u32);
+                }
+            }
+        }
+    }
     let mut seen = HashSet::new();
     for edge in meshed.edge_iter() {
         if !seen.insert(edge.id()) {
             continue;
         }
-        let curve = edge.curve();
-        out.edges.push(
-            curve
-                .iter()
-                .map(|p| [p.x as f32, p.y as f32, p.z as f32])
-                .collect(),
-        );
+        let poly: Vec<[f32; 3]> = edge
+            .curve()
+            .iter()
+            .map(|p| [p.x as f32, p.y as f32, p.z as f32])
+            .collect();
+        let faces = edge_faces.get(&edge.id()).cloned().unwrap_or_default();
+        if faces.len() == 2 && poly.len() >= 2 && is_smooth_edge(&out, &poly, faces[0], faces[1]) {
+            continue;
+        }
+        out.edges.push(poly);
     }
     let mut min = [f32::INFINITY; 3];
     let mut max = [f32::NEG_INFINITY; 3];
@@ -743,6 +807,32 @@ fn tessellate_unguarded(solid: &Solid, tol: f64) -> BodyMesh {
     out.bbox_min = min;
     out.bbox_max = max;
     out
+}
+
+/// True when the two faces meet tangentially along the edge (normals within ~2.5° at
+/// both ends and the middle of the edge), e.g. the seam of a cylinder or a fillet
+/// boundary. Such edges are not drawn or pickable, like in Shapr3D.
+fn is_smooth_edge(m: &BodyMesh, poly: &[[f32; 3]], fa: u32, fb: u32) -> bool {
+    let normal_near = |f: u32, p: [f32; 3]| -> Option<[f32; 3]> {
+        let mut best = (f32::INFINITY, None);
+        for (i, q) in m.positions.iter().enumerate() {
+            if m.face_ids[i] != f {
+                continue;
+            }
+            let d = (0..3).map(|k| (q[k] - p[k]).powi(2)).sum::<f32>();
+            if d < best.0 {
+                best = (d, Some(m.normals[i]));
+            }
+        }
+        best.1
+    };
+    let samples = [poly[0], poly[poly.len() / 2], poly[poly.len() - 1]];
+    samples
+        .iter()
+        .all(|p| match (normal_near(fa, *p), normal_near(fb, *p)) {
+            (Some(a), Some(b)) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2] > 0.999,
+            _ => false,
+        })
 }
 
 /// Merges identical vertices (same position, normal and face) to shrink buffers.
@@ -882,6 +972,24 @@ mod tests {
     }
 
     #[test]
+    fn smooth_seams_are_hidden() {
+        // a cylinder shows its two circles, but no seam line on the side
+        let c = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
+        let m = tessellate(&c, 0.05);
+        for e in &m.edges {
+            let z0 = e[0][2];
+            assert!(
+                e.iter().all(|p| (p[2] - z0).abs() < 1e-4),
+                "vertical seam edge drawn: {e:?}"
+            );
+        }
+        assert!(!m.edges.is_empty());
+        // a box keeps all 12 sharp edges
+        let b = make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap();
+        assert_eq!(tessellate(&b, 0.05).edges.len(), 12);
+    }
+
+    #[test]
     fn cylinder_and_sphere_volumes() {
         let c = make_cylinder([0.0; 3], 5.0, 10.0).unwrap();
         let vc = tessellate(&c, 0.005).volume();
@@ -891,6 +999,16 @@ mod tests {
         let vs = tessellate(&s, 0.005).volume();
         let exps = 4.0 / 3.0 * std::f64::consts::PI * 125.0;
         assert!((vs - exps).abs() / exps < 1e-2, "sphere {vs}");
+        // a sphere that contains the origin (this used to mesh wrongly)
+        let s = make_sphere([5.0, 5.0, 5.0], 10.0).unwrap();
+        let vs = tessellate(&s, 0.005).volume();
+        let exps = 4.0 / 3.0 * std::f64::consts::PI * 1000.0;
+        assert!((vs - exps).abs() / exps < 1e-2, "sphere {vs}");
+        // torus: 2 pi^2 R r^2
+        let t = make_torus([1.0, 2.0, 3.0], [0.0, 1.0, 1.0], [1.0, 0.0, 0.0], 20.0, 5.0).unwrap();
+        let vt = tessellate(&t, 0.005).volume();
+        let expt = 2.0 * std::f64::consts::PI.powi(2) * 20.0 * 25.0;
+        assert!((vt - expt).abs() / expt < 1e-2, "torus {vt} vs {expt}");
     }
 
     #[test]

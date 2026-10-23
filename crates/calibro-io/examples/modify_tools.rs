@@ -66,6 +66,7 @@ fn main() {
             plane: Plane::XZ,
             sketch: prof,
             on_body: None,
+            attach: None,
         },
     );
     let mut path = Sketch::new();
@@ -85,6 +86,7 @@ fn main() {
             },
             sketch: path,
             on_body: None,
+            attach: None,
         },
     );
     doc.add_feature(
@@ -106,6 +108,7 @@ fn main() {
             plane: Plane::XY,
             sketch: s1,
             on_body: None,
+            attach: None,
         },
     );
     let mut s2 = Sketch::new();
@@ -119,6 +122,7 @@ fn main() {
             },
             sketch: s2,
             on_body: None,
+            attach: None,
         },
     );
     doc.add_feature(

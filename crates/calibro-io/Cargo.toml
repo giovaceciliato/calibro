@@ -15,6 +15,7 @@ calibro-kernel.workspace = true
 calibro-core.workspace = true
 truck-meshalgo.workspace = true
 truck-topology.workspace = true
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 calibro-project.workspace = true

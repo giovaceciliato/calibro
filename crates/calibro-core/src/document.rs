@@ -135,6 +135,19 @@ impl MeshResource {
     }
 }
 
+/// Geometric signature of the planar face a sketch was drawn on (topological naming v1).
+/// Re-resolved on every recompute: the face of the body with the same outward normal whose
+/// plane is closest to the remembered one (ties broken by distance to `anchor`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FaceAttach {
+    /// Outward normal of the face when the sketch was created.
+    pub normal: [f64; 3],
+    /// `normal · p` of the face plane when the sketch was created.
+    pub offset: f64,
+    /// A point inside the face when the sketch was created (its centroid).
+    pub anchor: [f64; 3],
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum FeatureKind {
@@ -144,6 +157,10 @@ pub enum FeatureKind {
         /// Body whose face the sketch was placed on (used for smart defaults).
         #[serde(default)]
         on_body: Option<BodyId>,
+        /// The face of `on_body` the sketch is attached to. When set, the sketch plane
+        /// follows that face when earlier features change (e.g. the body gets taller).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        attach: Option<FaceAttach>,
     },
     Extrude {
         sketch: FeatureId,

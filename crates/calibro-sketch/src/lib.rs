@@ -4,10 +4,12 @@
 //! geometric constraint solver, and closed-region (profile) detection used by
 //! extrude and revolve.
 
+pub mod intersect;
 pub mod model;
 pub mod profile;
 pub mod solver;
 
+pub use intersect::trim_curve;
 pub use model::*;
 pub use profile::{find_profiles, profile_at, Loop, Profile, Segment};
 pub use solver::{drag_point, solve, SolveReport, SolveStatus};
@@ -18,6 +20,78 @@ mod tests {
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-6
+    }
+
+    #[test]
+    fn overlapping_circles_give_three_regions() {
+        let mut s = Sketch::new();
+        s.add_circle([0.0, 0.0], 10.0);
+        s.add_circle([10.0, 0.0], 10.0);
+        let p = find_profiles(&s);
+        assert_eq!(p.len(), 3, "{p:?}");
+        let lens = 200.0 * (0.5f64).acos() - 5.0 * 300f64.sqrt();
+        let crescent = std::f64::consts::PI * 100.0 - lens;
+        let mut areas: Vec<f64> = p.iter().map(|r| r.area()).collect();
+        areas.sort_by(|a, b| a.total_cmp(b));
+        assert!((areas[0] - lens).abs() < 0.5, "{areas:?}");
+        assert!(
+            (areas[1] - crescent).abs() < 0.5 && (areas[2] - crescent).abs() < 0.5,
+            "{areas:?}"
+        );
+    }
+
+    #[test]
+    fn line_across_rectangle_splits_it() {
+        let mut s = Sketch::new();
+        s.add_rectangle([0.0, 0.0], [20.0, 10.0]);
+        s.add_line_xy([5.0, -5.0], [5.0, 15.0]); // crosses both long sides, ends outside
+        let p = find_profiles(&s);
+        assert_eq!(p.len(), 2, "{p:?}");
+        let mut areas: Vec<f64> = p.iter().map(|r| r.area()).collect();
+        areas.sort_by(|a, b| a.total_cmp(b));
+        assert!(
+            approx(areas[0], 50.0) && approx(areas[1], 150.0),
+            "{areas:?}"
+        );
+        // T junction: a line from the middle of a side to the opposite side
+        let mut t = Sketch::new();
+        t.add_rectangle([0.0, 0.0], [20.0, 10.0]);
+        t.add_line_xy([12.0, 0.0], [12.0, 10.0]);
+        assert_eq!(find_profiles(&t).len(), 2);
+    }
+
+    #[test]
+    fn trim_pieces() {
+        // circle cut by a line through its centre: trim the lower half
+        let mut s = Sketch::new();
+        let c = s.add_circle([0.0, 0.0], 10.0);
+        let l = s.add_line_xy([-20.0, 0.0], [20.0, 0.0]);
+        let new = trim_curve(&mut s, c, [0.0, -10.0]).unwrap();
+        assert_eq!(new.len(), 1);
+        assert!(matches!(s.curves[&new[0]].kind, CurveKind::Arc { .. }));
+        // trim the line's outer pieces: left and right of the arc
+        let pieces = trim_curve(&mut s, l, [-15.0, 0.0]).unwrap();
+        assert_eq!(pieces.len(), 1);
+        let pieces = trim_curve(&mut s, pieces[0], [15.0, 0.0]).unwrap();
+        assert_eq!(pieces.len(), 1);
+        let p = find_profiles(&s);
+        assert_eq!(p.len(), 1);
+        assert!(
+            (p[0].area() - std::f64::consts::PI * 50.0).abs() < 0.5,
+            "{}",
+            p[0].area()
+        );
+        // a curve that crosses nothing is deleted entirely
+        let lone = s.add_line_xy([50.0, 50.0], [60.0, 50.0]);
+        assert!(trim_curve(&mut s, lone, [55.0, 50.0]).unwrap().is_empty());
+        assert!(!s.curves.contains_key(&lone));
+        // middle piece of a line crossing two others: two pieces remain
+        let mut m = Sketch::new();
+        let base = m.add_line_xy([0.0, 0.0], [30.0, 0.0]);
+        m.add_line_xy([10.0, -5.0], [10.0, 5.0]);
+        m.add_line_xy([20.0, -5.0], [20.0, 5.0]);
+        assert_eq!(trim_curve(&mut m, base, [15.0, 0.0]).unwrap().len(), 2);
+        m.validate().unwrap();
     }
 
     #[test]

@@ -18,6 +18,7 @@ fn main() {
             plane: Plane::XY,
             sketch: s,
             on_body: None,
+            attach: None,
         },
     );
     let plate = doc.add_feature(
@@ -87,6 +88,11 @@ fn main() {
     std::fs::write(
         out.join("sample.glb"),
         calibro_io::export_glb(&bodies).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        out.join("sample.3mf"),
+        calibro_io::export_3mf(&bodies).unwrap(),
     )
     .unwrap();
     std::fs::write(

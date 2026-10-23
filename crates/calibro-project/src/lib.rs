@@ -26,7 +26,8 @@ pub const EXTENSION: &str = "calibro";
 pub const MIME_TYPE: &str = "application/vnd.calibro.project";
 pub const FORMAT_NAME: &str = "calibro-project";
 /// 2: added Fillet, Chamfer, Shell, Sweep and Loft features (v1 files load unchanged).
-pub const FORMAT_VERSION: u32 = 2;
+/// 3: sketches may carry `attach` (the face they follow); v1/v2 files load unchanged.
+pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectError {
@@ -119,8 +120,9 @@ pub fn migrate(
 ) -> Result<serde_json::Value, ProjectError> {
     match from_version {
         FORMAT_VERSION => Ok(value),
-        // v1 -> v2 only added new feature kinds; existing data is identical.
-        1 => Ok(value),
+        // v1 -> v2 only added new feature kinds; v2 -> v3 added the optional `attach`
+        // field of sketches (absent = not attached). Existing data is identical.
+        1 | 2 => Ok(value),
         // Future: 1 => migrate_1_to_2(value) ...
         v => Err(ProjectError::UnsupportedVersion {
             found: v,
@@ -239,6 +241,7 @@ mod tests {
                 plane: Plane::XY,
                 sketch: s,
                 on_body: None,
+                attach: None,
             },
         );
         let ex = doc.add_feature(
@@ -274,6 +277,30 @@ mod tests {
             "Ref",
             FeatureKind::ImportedMesh {
                 resource: "mesh0.bin".into(),
+            },
+        );
+        doc.add_feature(
+            "On top",
+            FeatureKind::Sketch {
+                plane: Plane {
+                    origin: [0.0, 0.0, 6.0],
+                    ..Plane::XY
+                },
+                sketch: Sketch::new(),
+                on_body: Some(body),
+                attach: Some(FaceAttach {
+                    normal: [0.0, 0.0, 1.0],
+                    offset: 6.0,
+                    anchor: [15.0, 10.0, 6.0],
+                }),
+            },
+        );
+        doc.add_feature(
+            "Round",
+            FeatureKind::Fillet {
+                body,
+                edges: vec![[[0.0, 0.0, 6.0], [30.0, 0.0, 6.0]]],
+                radius: 1.0,
             },
         );
         doc

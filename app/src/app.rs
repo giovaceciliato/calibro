@@ -14,9 +14,12 @@ pub enum Tool {
     Select,
     Line,
     Rectangle,
+    CenterRectangle,
     Circle,
     Arc,
+    Arc3,
     Polygon,
+    Trim,
     Measure,
 }
 
@@ -24,7 +27,13 @@ impl Tool {
     pub fn is_sketch_tool(self) -> bool {
         matches!(
             self,
-            Tool::Line | Tool::Rectangle | Tool::Circle | Tool::Arc | Tool::Polygon
+            Tool::Line
+                | Tool::Rectangle
+                | Tool::CenterRectangle
+                | Tool::Circle
+                | Tool::Arc
+                | Tool::Arc3
+                | Tool::Polygon
         )
     }
     pub fn hint(self) -> &'static str {
@@ -35,6 +44,9 @@ impl Tool {
             Tool::Circle => "Circle: click centre then circumference, or drag from centre · set an exact radius in Properties · Esc cancels",
             Tool::Arc => "Arc: click the centre, the start point, then the end (counter-clockwise)",
             Tool::Polygon => "Polygon: click the centre, then a corner",
+            Tool::CenterRectangle => "Centre rectangle: click the centre, then a corner",
+            Tool::Arc3 => "3-point arc: click the start, the end, then a point the arc passes through",
+            Tool::Trim => "Trim: click the piece of a curve to remove it (curves are cut where they cross)",
             Tool::Measure => "Measure: click two points on the model · Esc to reset",
         }
     }
@@ -88,6 +100,8 @@ pub struct SketchSession {
     pub circle_dragging: bool,
     pub circle_radius: f64,
     pub grid_snap: bool,
+    /// Dimension being edited on the canvas: (constraint, text, screen position).
+    pub dim_edit: Option<(ConstraintId, String, egui::Pos2)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -130,6 +144,9 @@ pub struct Measure {
     pub b: Option<DVec3>,
 }
 
+/// Cached section cap of a body: (mesh pointer, plane bits, triangles).
+pub type SectionCap = (usize, [u64; 4], std::sync::Arc<Vec<[f32; 3]>>);
+
 /// Cached triangulated sketch-region fills: (content hash, triangles per region).
 pub type RegionFills = (u64, Vec<Vec<[f32; 3]>>);
 
@@ -154,6 +171,8 @@ pub struct CalibroApp {
     pub allow_close: bool,
     pub view: Option<CameraView>,
     pub fill_cache: HashMap<FeatureId, RegionFills>,
+    /// Section-view caps per body: (mesh pointer, plane) -> triangles.
+    pub cap_cache: HashMap<BodyId, SectionCap>,
     pub recovery: Option<Document>,
     pub show_shortcuts: bool,
     pub show_about: bool,
@@ -223,6 +242,7 @@ impl CalibroApp {
             allow_close: false,
             view: None,
             fill_cache: HashMap::new(),
+            cap_cache: HashMap::new(),
             recovery,
             show_shortcuts: false,
             show_about: false,
@@ -405,8 +425,61 @@ impl CalibroApp {
         }
     }
 
+    /// STEP files become editable solids when every shell converts; otherwise the file
+    /// is imported as a reference mesh as before.
+    fn import_step_as_solids(&mut self, f: &PickedFile) -> bool {
+        let Ok(text) = std::str::from_utf8(&f.bytes) else {
+            return false;
+        };
+        let Ok(r) = calibro_io::import_step_solids(text) else {
+            return false;
+        };
+        if r.solids.is_empty() || !r.skipped.is_empty() {
+            return false;
+        }
+        let mut resources = Vec::new();
+        for s in &r.solids {
+            match calibro_core::kernel::solid_to_json(s) {
+                Ok(j) => resources.push(j),
+                Err(_) => return false,
+            }
+        }
+        let name = f.name.clone();
+        let n = resources.len();
+        self.ed.apply("Import", |d| {
+            for (i, json) in resources.into_iter().enumerate() {
+                let key = format!(
+                    "import_{}_{}_{i}.brep.json",
+                    d.features.len() + 1,
+                    sanitize(&name)
+                );
+                d.resources.insert(key.clone(), json.into_bytes());
+                let label = if n == 1 {
+                    name.clone()
+                } else {
+                    format!("{name} ({})", i + 1)
+                };
+                let id = d.add_feature(label.clone(), FeatureKind::ImportedSolid { resource: key });
+                d.body_props_mut(BodyId {
+                    feature: id,
+                    index: 0,
+                })
+                .name = label;
+            }
+        });
+        self.info(format!(
+            "Imported {} as {n} editable solid(s) — you can cut, join, fillet and sketch on it",
+            f.name
+        ));
+        self.zoom_to_fit();
+        true
+    }
+
     pub fn import_picked(&mut self, f: PickedFile) {
         let lower = f.name.to_lowercase();
+        if (lower.ends_with(".step") || lower.ends_with(".stp")) && self.import_step_as_solids(&f) {
+            return;
+        }
         let result: Result<MeshResource, String> = if lower.ends_with(".stl") {
             calibro_io::import_stl(&f.bytes).map_err(|e| e.to_string())
         } else if lower.ends_with(".obj") {
@@ -490,6 +563,11 @@ impl CalibroApp {
                         (obj.into_bytes(), "OBJ mesh", "obj")
                     }
                 }
+                "3mf" => (
+                    calibro_io::export_3mf(&bodies).map_err(|e| e.to_string())?,
+                    "3MF (3D printing)",
+                    "3mf",
+                ),
                 "glb" => (
                     calibro_io::export_glb(&bodies).map_err(|e| e.to_string())?,
                     "glTF binary",
@@ -578,6 +656,11 @@ impl CalibroApp {
                 if f.hidden {
                     continue;
                 }
+                let plane = &self
+                    .ed
+                    .model()
+                    .sketch_plane(self.ed.doc(), f.id)
+                    .unwrap_or(*plane);
                 if let Some((a, b)) = sketch.bounds() {
                     for p in [a, b, [a[0], b[1]], [b[0], a[1]]] {
                         let w = DVec3::from(plane.to_world(p));
@@ -603,6 +686,15 @@ impl CalibroApp {
     // ------------------------------------------------------------------ sketch session
 
     pub fn start_sketch(&mut self, plane: Plane, on_body: Option<BodyId>) {
+        self.start_sketch_attached(plane, on_body, None);
+    }
+
+    pub fn start_sketch_attached(
+        &mut self,
+        plane: Plane,
+        on_body: Option<BodyId>,
+        attach: Option<FaceAttach>,
+    ) {
         let id = self.ed.apply("New sketch", |d| {
             d.add_feature(
                 "",
@@ -610,6 +702,7 @@ impl CalibroApp {
                     plane,
                     sketch: calibro_core::sketch::Sketch::new(),
                     on_body,
+                    attach,
                 },
             )
         });
@@ -645,7 +738,22 @@ impl CalibroApp {
                 hi = hi.max(p);
             }
         }
-        self.start_sketch(plane, Some(body));
+        // remember which face this is, so the sketch follows it when the body changes
+        let (mut sum, mut cnt) = (glam::DVec3::ZERO, 0.0);
+        for t in mesh.indices.chunks_exact(3) {
+            if mesh.face_ids[t[0] as usize] == face {
+                for &i in t {
+                    sum += glam::DVec3::from(mesh.positions[i as usize].map(|x| x as f64));
+                    cnt += 1.0;
+                }
+            }
+        }
+        let attach = (cnt > 0.0).then(|| FaceAttach {
+            normal: n.to_array(),
+            offset: n.dot(o),
+            anchor: (sum / cnt).to_array(),
+        });
+        self.start_sketch_attached(plane, Some(body), attach);
         if lo.x.is_finite() {
             self.ed.apply_silent(|d| {
                 camera::fit(&mut d.camera, lo, hi);
@@ -661,6 +769,11 @@ impl CalibroApp {
         else {
             return;
         };
+        let plane = self
+            .ed
+            .model()
+            .sketch_plane(self.ed.doc(), id)
+            .unwrap_or(plane);
         self.ed.apply_silent(|d| {
             let target = d.camera.target;
             camera::look_at_plane(&mut d.camera, plane.normal(), target);
@@ -682,6 +795,7 @@ impl CalibroApp {
             circle_dragging: false,
             circle_radius: 10.0,
             grid_snap: true,
+            dim_edit: None,
         });
         self.sel = Selection {
             feature: Some(id),
@@ -1284,6 +1398,9 @@ impl CalibroApp {
             if plain(Key::P) {
                 self.set_tool(Tool::Polygon);
             }
+            if plain(Key::T) {
+                self.set_tool(Tool::Trim);
+            }
             if plain(Key::S) {
                 self.set_tool(Tool::Select);
             }
@@ -1470,7 +1587,10 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Ctrl+Z / Ctrl+Shift+Z", "Undo / Redo"),
     ("Ctrl+Shift+P", "Save viewport image (desktop)"),
     ("S", "New sketch (pick plane) · in a sketch: Select tool"),
-    ("L R C A P", "Sketch: Line, Rectangle, Circle, Arc, Polygon"),
+    (
+        "L R C A P T",
+        "Sketch: Line, Rectangle, Circle, Arc, Polygon, Trim",
+    ),
     ("Enter", "Finish sketch"),
     ("E", "Extrude selected regions"),
     (

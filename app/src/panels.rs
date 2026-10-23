@@ -433,11 +433,10 @@ impl CalibroApp {
                 let tool_btn = crate::style::tool_button;
                 crate::style::section(ui, if in_sketch { "SKETCH TOOLS" } else { "MODELING" });
                 if tool_btn(ui, self.tool == Tool::Select, "Select", "Select faces, bodies, regions (Esc)") {
-                    self.tool = Tool::Select;
+                    self.set_tool(Tool::Select);
                 }
                 if tool_btn(ui, self.tool == Tool::Measure, "Measure", "Distance between two points (M)") {
-                    self.tool = Tool::Measure;
-                    self.measure = Measure::default();
+                    self.set_tool(Tool::Measure);
                 }
                 ui.separator();
                 crate::style::section(ui, "SKETCH");
@@ -449,16 +448,12 @@ impl CalibroApp {
                     for (t, label, tip) in [
                         (Tool::Line, "Line", "L"),
                         (Tool::Rectangle, "Rectangle", "R"),
-                        (Tool::Circle, "Circle", "C"),
+                        (Tool::Circle, "Circle", "Click centre then circumference, or drag from the centre (C)"),
                         (Tool::Arc, "Arc", "A"),
                         (Tool::Polygon, "Polygon", "P"),
                     ] {
                         if tool_btn(ui, self.tool == t, label, tip) {
-                            self.tool = t;
-                            if let Some(s) = &mut self.sketch {
-                                s.clicks.clear();
-                                s.chain_start = None;
-                            }
+                            self.set_tool(t);
                         }
                     }
                     if ui.add_sized([w, 28.0], egui::Button::new(RichText::new("Finish sketch").strong().color(crate::style::PANEL)).fill(ACCENT)).clicked() {
@@ -1517,6 +1512,38 @@ impl CalibroApp {
                     ui.label("Sides");
                     ui.add(egui::DragValue::new(&mut s.polygon_sides).range(3..=64));
                 });
+            }
+        }
+        if self.tool == Tool::Circle {
+            ui.separator();
+            ui.label(RichText::new("Circle · centre and radius").strong());
+            ui.weak("Click a centre, then click the circumference or drag and release.");
+            let mut create = None;
+            if let Some(s) = &mut self.sketch {
+                let center = s.clicks.first().copied();
+                ui.add_enabled_ui(center.is_some(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Radius");
+                        length_edit(ui, &mut s.circle_radius, units);
+                    });
+                    if ui
+                        .add_enabled(
+                            s.circle_radius.is_finite() && s.circle_radius > 1e-9,
+                            egui::Button::new("Create circle"),
+                        )
+                        .clicked()
+                    {
+                        create = center.map(|(pos, point)| (pos, point, s.circle_radius));
+                    }
+                });
+                if center.is_none() {
+                    ui.weak("Choose the centre in the sketch to enter an exact radius.");
+                } else {
+                    ui.weak("Set Radius and press Create circle, or continue in the sketch. Esc cancels.");
+                }
+            }
+            if let Some((center, point, radius)) = create {
+                self.create_sketch_circle(center, point, radius);
             }
         }
         ui.separator();

@@ -186,3 +186,28 @@ without a `v` prefix. The release exists as a mutable prerelease with zero asset
   or expired packages, draft/immutable release and invalid run IDs rejected.
 - Recovery is manual, checks the tag matches the build commit, reuses the original artifacts,
   and does not require rebuilding or moving the existing tag. Remote recovery not run yet.
+
+
+## 11. Update — 23 Oct 2026 (sketch circle gestures and exact radius)
+
+Reproduced the reported limitation on the previous native build: Circle created a closed
+region using two clicks, but pressing at the centre and dragging/releasing created nothing.
+Keyboard tool changes also retained unfinished points from the prior sketch tool.
+
+- Circle now supports two clicks, centre-drag-release, and choosing a centre followed by
+  an exact Radius in Properties → Create circle. The same undoable command handles all
+  three paths, validates positive finite radius/finite centre, and reuses snapped centres.
+- Toolbar/keyboard tool changes clear pending geometry consistently; Escape/right-click
+  cancel the pending gesture. Drag centres use the snapped press origin, not the first
+  position after the drag threshold. Interaction position is retained on release.
+- Four app regression tests simulate egui pointer/key events: two-click closed region and
+  one-step undo/redo; drag on XY/XZ with correct centre/radius and exactly one curve;
+  shortcut after an unfinished line and cancellation before release; numeric radius,
+  snapped-point reuse and rejection of zero/negative/nonfinite radii.
+- Pinned Rust 1.97: formatting, Clippy with warnings denied, native build and full workspace
+  tests pass: **72 passed**, 0 failed, 1 diagnostic ignored.
+- Native UI on Xvfb/lavapipe: press C → centre-drag-release creates one region; second
+  centre → type 12.5 mm → Create circle creates a second region. [Screenshot](images/sketch-circles.png).
+  Finish sketch → select first region → E creates one cylindrical body (10 mm extrusion),
+  inspected in isometric view. Browser/touch hardware and real desktop GPUs not retested.
+- No serialized document changes or project-format version change.

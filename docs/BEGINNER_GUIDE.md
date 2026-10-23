@@ -200,10 +200,13 @@ Then open **http://127.0.0.1:8080** in Chrome, Edge, Safari or Firefox.
 
 1. Press **S** (or click *New sketch*) and choose **Top**.
 2. Press **R** and click two corners → a rectangle. Press **C**, click a centre inside the
-   rectangle, click again for the radius → a circle.
+   rectangle, click again on the circumference → a circle. You can also press at the
+   centre, drag to the desired radius and release. For an exact circle: click the centre,
+   enter **Radius** in **Properties**, then click **Create circle**. **Esc** cancels the
+   unfinished circle; switching tools discards unfinished points from the previous tool.
 3. Click **Finish sketch**.
-4. Click inside the rectangle (not the circle) — the region turns orange. Press **E**.
-5. Drag the **orange arrow** up, or type a distance in the inspector on the right.
+4. Click inside the rectangle (not the circle) — the region turns blue. Press **E**.
+5. Drag the **blue arrow** up, or type a distance in the inspector on the right.
 6. Click the top face → **Sketch on this face** → draw a circle → *Finish* → click it → **E**:
    a boss is joined onto the plate.
 7. In **History** (right), click the first *Extrude* and change its distance — everything after
